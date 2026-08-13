@@ -2,6 +2,9 @@ name: Native ARM64 Win32 OpenSSH package
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - crutkas-package-arm64-openssh
 
 permissions:
   contents: read
