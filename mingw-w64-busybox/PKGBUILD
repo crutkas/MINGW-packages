@@ -72,15 +72,17 @@ check() {
   export SKIP_KNOWN_BUGS=true
   export TZ=UTC
 
-  ../busybox.exe sh ./runtest -v all_git_critical
-
   local _log="${srcdir}/busybox-tests-${MSYSTEM}.log"
-  ../busybox.exe sh ./runtest -v | tee "${_log}"
-  local _status=${PIPESTATUS[0]}
+  : >"${_log}"
+  ../busybox.exe sh ./runtest -v all_git_critical | tee -a "${_log}"
+  local _critical_status=${PIPESTATUS[0]}
+  ../busybox.exe sh ./runtest -v | tee -a "${_log}"
+  local _suite_status=${PIPESTATUS[0]}
   local _passes
   _passes="$(grep -c '^PASS:' "${_log}")"
 
-  if (( _status != 0 )) || grep -q '^FAIL:' "${_log}"; then
+  if (( _critical_status != 0 || _suite_status != 0 )) ||
+      grep -q '^FAIL:' "${_log}"; then
     printf 'BusyBox tests failed; observed %s passing tests.\n' "${_passes}" >&2
     return 1
   fi

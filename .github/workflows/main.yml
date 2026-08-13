@@ -69,12 +69,14 @@ jobs:
           release: true
 
       - name: Add staging repo
+        if: ${{ matrix.msystem != 'CLANGARM64' }}
         shell: msys2 {0}
         run: |
           cp /etc/pacman.conf /etc/pacman.conf.bak
           grep -qFx '[staging]' /etc/pacman.conf || sed -i '/^# \[staging\]/,/^$/ s|^# ||g' /etc/pacman.conf
 
       - name: Update using staging
+        if: ${{ matrix.msystem != 'CLANGARM64' }}
         run: |
           msys2 -c 'pacman --noconfirm -Suuy'
           msys2 -c 'pacman --noconfirm -Suu'
@@ -178,7 +180,7 @@ jobs:
         continue-on-error: true
         run: |
           If (Test-Path "C:\_") { rm -r -fo "C:\_" }
-          msys2 -c 'mv -f /etc/pacman.conf.bak /etc/pacman.conf'
+          msys2 -c 'test ! -f /etc/pacman.conf.bak || mv -f /etc/pacman.conf.bak /etc/pacman.conf'
           msys2 -c 'pacman --noconfirm -Suuy'
           msys2 -c 'pacman --noconfirm -Suu'
 
