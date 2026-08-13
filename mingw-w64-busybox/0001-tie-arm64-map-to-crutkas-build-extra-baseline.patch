@@ -1,0 +1,31 @@
+From 3be21478c99bff56fd2d252c6e00d9da4eb63dd7 Mon Sep 17 00:00:00 2001
+From: Clint Rutkas <crutkas@microsoft.com>
+Date: Thu, 13 Aug 2026 14:20:08 -0700
+Subject: [PATCH] Tie ARM64 map to crutkas build-extra baseline
+
+Record the exact fork-local payload baseline used by the package.  The
+candidate and gap sets remain unchanged and do not claim GNU semantic
+parity.
+---
+ arm64-payload-replacements.json | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/arm64-payload-replacements.json b/arm64-payload-replacements.json
+index 4eb248ace..7e1751e9c 100644
+--- a/arm64-payload-replacements.json
++++ b/arm64-payload-replacements.json
+@@ -1,7 +1,10 @@
+ {
+   "schemaVersion": 1,
+   "baseline": {
+-    "sourcePullRequest": "https://github.com/git-for-windows/build-extra/pull/728",
++    "sourcePullRequest": "https://github.com/crutkas/build-extra/pull/1",
++    "sourceCommit": "9e8e3eb929ae5c7fe8a2d899be2eefdc07356c19",
++    "payloadManifest": "arm64-payload-architecture-v2.55.0.4.tsv",
++    "payloadManifestSha256": "ae1e311fd81258150c2300d02c58655f30b190a15bcbe3ea8bbaccc1ce8c1c9a",
+     "releaseTag": "v2.55.0.windows.4",
+     "packages": {
+       "coreutils": 108,
+-- 
+2.51.0.windows.1
+

@@ -19,7 +19,7 @@ jobs:
           { msystem: CLANG64, runner: windows-2025 },
           { msystem: MINGW64, runner: windows-2025 },
           { msystem: MINGW32, runner: windows-2025 },
-          # { msystem: CLANGARM64, runner: ['Windows', 'ARM64', 'CI'] }
+          { msystem: CLANGARM64, runner: windows-11-arm }
         ]
     name: ${{ matrix.msystem }}
     runs-on: ${{ matrix.runner }}
@@ -59,7 +59,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          architecture: 'x64'
+          architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -91,14 +91,79 @@ jobs:
         run: |
           cd /C/_
           unset VCPKG_ROOT
+          SOURCE_DATE_EPOCH=1786654184 \
+          CI_BASE_REPOSITORY=crutkas/MINGW-packages \
+          CI_BASE_BRANCH=woarm64 \
           MINGW_ARCH=${{ matrix.msystem }} ./.ci/ci-build.sh
+
+      - name: Test and reproduce native ARM64 package
+        if: ${{ matrix.msystem == 'CLANGARM64' }}
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd /C/_/mingw-w64-busybox
+          export SOURCE_DATE_EPOCH=1786654184
+          makepkg-mingw \
+            --noconfirm \
+            --noprogressbar \
+            --syncdeps \
+            --cleanbuild \
+            --nobuild
+          pacman -Q | LC_ALL=C sort > /tmp/busybox-package-state
+
+          makepkg-mingw --noconfirm --noprogressbar --cleanbuild
+
+          cp "src/busybox-tests-${MSYSTEM}.log" /C/_/artifacts/
+          tested="$(printf '%s\n' "${MINGW_PACKAGE_PREFIX}"-busybox-*.pkg.tar.*)"
+          reproducible_copy="/tmp/$(basename "${tested}")"
+          cp "${tested}" "${reproducible_copy}"
+          rm -f "${tested}"
+
+          makepkg-mingw \
+            --noconfirm \
+            --noprogressbar \
+            --cleanbuild \
+            --nocheck
+
+          pacman -Q | LC_ALL=C sort > /tmp/busybox-package-state.rebuilt
+          cmp /tmp/busybox-package-state /tmp/busybox-package-state.rebuilt
+
+          rebuilt="$(printf '%s\n' "${MINGW_PACKAGE_PREFIX}"-busybox-*.pkg.tar.*)"
+          test "$(sha256sum "${rebuilt}" | cut -d' ' -f1)" = \
+            "$(sha256sum "${reproducible_copy}" | cut -d' ' -f1)"
+
+          artifact="/C/_/artifacts/$(basename "${rebuilt}")"
+          cp "${rebuilt}" "${artifact}"
+          pacman --noprogressbar --upgrade --noconfirm "${artifact}"
+
+      - name: Validate native ARM64 package
+        if: ${{ matrix.msystem == 'CLANGARM64' }}
+        shell: pwsh
+        run: |
+          $packages = @(
+            Get-ChildItem `
+              'C:\_\artifacts\mingw-w64-clang-aarch64-busybox-*.pkg.tar.*'
+          )
+          if ($packages.Count -ne 1) {
+            throw "Expected one ARM64 BusyBox package, found $($packages.Count)"
+          }
+          $package = $packages[0]
+          C:\_\mingw-w64-busybox\validate-arm64-package.ps1 `
+            -PackageFile $package.FullName `
+            -TestLog 'C:\_\artifacts\busybox-tests-CLANGARM64.log' `
+            -ArtifactsDirectory 'C:\_\artifacts'
 
       - name: "Upload binaries"
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.msystem }}-packages
-          path: C:/_/artifacts/*.pkg.tar.*
+          path: |
+            C:/_/artifacts/*.pkg.tar.*
+            C:/_/artifacts/busybox-arm64-artifact.json
+            C:/_/artifacts/SHA256SUMS
+            C:/_/artifacts/downstream-install.txt
+            C:/_/artifacts/busybox-tests-CLANGARM64.log
           if-no-files-found: ignore
 
       - name: "Upload dumps"

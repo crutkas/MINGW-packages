@@ -1,0 +1,109 @@
+# Maintainer: Clint Rutkas <crutkas@microsoft.com>
+
+_realname=busybox
+_commit=e7299058b4074a19cfae0f446ec45ab87e804a27
+pkgbase=mingw-w64-${_realname}
+pkgname=("${MINGW_PACKAGE_PREFIX}-${_realname}")
+pkgver=1.38.0.git.e7299058
+pkgrel=1
+pkgdesc="Native Windows BusyBox utilities; applet compatibility is not GNU semantic parity (mingw-w64)"
+arch=('any')
+mingw_arch=('mingw32' 'mingw64' 'ucrt64' 'clang64' 'clangarm64')
+url='https://github.com/crutkas/busybox-w32'
+license=('spdx:GPL-2.0-only')
+makedepends=("${MINGW_PACKAGE_PREFIX}-cc")
+checkdepends=('sharutils' 'xz' 'zip')
+source=("${_realname}-${_commit}.tar.gz::https://codeload.github.com/crutkas/busybox-w32/tar.gz/${_commit}"
+        '0001-tie-arm64-map-to-crutkas-build-extra-baseline.patch')
+sha256sums=('205e5ad0a4733727cb3b6cfc08e1ede387dcb5edb6240e9ecbc6692b305a37a4'
+            'c16942f80db3a6b67ce8ce6eabdfa14c0dea024f036a8480ad0925983012ba7c')
+
+_srcdir="${_realname}-w32-${_commit}"
+
+_busybox_config() {
+  case "${MSYSTEM}" in
+    MINGW32)
+      printf 'mingw32'
+      ;;
+    CLANGARM64)
+      printf 'mingw64a'
+      ;;
+    *)
+      printf 'mingw64'
+      ;;
+  esac
+}
+
+_busybox_compiler() {
+  case "${MSYSTEM}" in
+    CLANG*)
+      printf 'clang'
+      ;;
+    *)
+      printf 'gcc'
+      ;;
+  esac
+}
+
+prepare() {
+  cd "${srcdir}/${_srcdir}"
+  patch -Np1 -i "${srcdir}/0001-tie-arm64-map-to-crutkas-build-extra-baseline.patch"
+}
+
+build() {
+  cd "${srcdir}/${_srcdir}"
+
+  make \
+    HOST_COMPILER="$(_busybox_compiler)" \
+    CROSS_COMPILER="$(_busybox_compiler)" \
+    "$(_busybox_config)_defconfig"
+  make \
+    HOST_COMPILER="$(_busybox_compiler)" \
+    CROSS_COMPILER="$(_busybox_compiler)" \
+    busybox.exe \
+    busybox.links
+}
+
+check() {
+  cd "${srcdir}/${_srcdir}/testsuite"
+
+  export DEBUG=true
+  export LC_ALL=C.UTF-8
+  export SKIP_KNOWN_BUGS=true
+  export TZ=UTC
+
+  ../busybox.exe sh ./runtest -v all_git_critical
+
+  local _log="${srcdir}/busybox-tests-${MSYSTEM}.log"
+  ../busybox.exe sh ./runtest -v | tee "${_log}"
+  local _status=${PIPESTATUS[0]}
+  local _passes
+  _passes="$(grep -c '^PASS:' "${_log}")"
+
+  if (( _status != 0 )) || grep -q '^FAIL:' "${_log}"; then
+    printf 'BusyBox tests failed; observed %s passing tests.\n' "${_passes}" >&2
+    return 1
+  fi
+
+  if [[ "${MSYSTEM}" == CLANGARM64 && "${_passes}" != 1089 ]]; then
+    printf 'Expected 1089 passing ARM64 tests; observed %s.\n' "${_passes}" >&2
+    return 1
+  fi
+}
+
+package() {
+  cd "${srcdir}/${_srcdir}"
+
+  install -Dm755 busybox.exe \
+    "${pkgdir}${MINGW_PREFIX}/bin/busybox.exe"
+  install -Dm644 .config \
+    "${pkgdir}${MINGW_PREFIX}/share/busybox/busybox.config"
+  install -Dm644 busybox.links \
+    "${pkgdir}${MINGW_PREFIX}/share/busybox/busybox.links"
+  install -Dm644 arm64-payload-replacements.json \
+    "${pkgdir}${MINGW_PREFIX}/share/busybox/arm64-payload-map.json"
+  install -Dm644 README.md \
+    "${pkgdir}${MINGW_PREFIX}/share/doc/${_realname}/README.md"
+  install -Dm644 LICENSE \
+    "${pkgdir}${MINGW_PREFIX}/share/licenses/${_realname}/LICENSE"
+}
