@@ -1,0 +1,9 @@
+diff --git a/tests/Invoke-OpenSSHClientSmoke.ps1 b/tests/Invoke-OpenSSHClientSmoke.ps1
+index a3fd81b..6cd554a 100644
+--- a/tests/Invoke-OpenSSHClientSmoke.ps1
++++ b/tests/Invoke-OpenSSHClientSmoke.ps1
+@@ -453,3 +453,3 @@ finally {
+     if (-not $openSshRegistryKeyExisted) {
+-        Remove-Item -Path $openSshRegistryPath -Force -ErrorAction SilentlyContinue
++        & reg.exe delete 'HKLM\SOFTWARE\OpenSSH' /f 2>$null | Out-Null
+     }

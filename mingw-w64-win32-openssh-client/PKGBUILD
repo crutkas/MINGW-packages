@@ -26,6 +26,7 @@ source=(
   "openssh-portable-${_openssh_revision}.tar.gz::https://github.com/PowerShell/openssh-portable/archive/${_openssh_revision}.tar.gz"
   "vcpkg::git+https://github.com/microsoft/vcpkg.git#commit=${_vcpkg_revision}"
   '0001-enable-reproducible-linking.patch'
+  '0002-fix-smoke-registry-cleanup.patch'
   'baseline-paths.json'
   'README.md'
 )
@@ -34,6 +35,7 @@ sha256sums=(
   '45f316a54fdc0d81a2f8e503ecf78958e0ffc953936a022efc8405b7f14dae0d'
   'SKIP'
   '0a7e859d99b19a352b95b2c399f5e2c6e490ac1ae8317d0d74c4e699506d5462'
+  'eaf22d4e8a08a96a6e6cc7ecc9f5ca521e4f665aaf6e94ccc21b3b8b45c5aa28'
   'd166d522a658e113ab47c317ad756a1d804a3bf644ada71277d405d62114413b'
   'f0567a718a8746465039a50647bf0ac47524d0a9c01c21d0ca2953336773643a'
 )
@@ -47,6 +49,9 @@ _assert_native_arm64() {
 
 prepare() {
   _assert_native_arm64
+
+  cd "${srcdir}/Win32-OpenSSH-${_automation_revision}"
+  patch -Np1 -i "${srcdir}/0002-fix-smoke-registry-cleanup.patch"
 
   cd "${srcdir}/openssh-portable-${_openssh_revision}"
   # Win32's build helper discovers its repository root through git.
