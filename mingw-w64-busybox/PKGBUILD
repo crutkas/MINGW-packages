@@ -16,7 +16,7 @@ checkdepends=('sharutils' 'xz' 'zip')
 source=("${_realname}-${_commit}.tar.gz::https://codeload.github.com/crutkas/busybox-w32/tar.gz/${_commit}"
         '0001-tie-arm64-map-to-crutkas-build-extra-baseline.patch')
 sha256sums=('205e5ad0a4733727cb3b6cfc08e1ede387dcb5edb6240e9ecbc6692b305a37a4'
-            'c16942f80db3a6b67ce8ce6eabdfa14c0dea024f036a8480ad0925983012ba7c')
+            'a73ef0cf3f9470366c0c42f18ec78de9745bc6ad1add41f5a710e551be40acc9')
 
 _srcdir="${_realname}-w32-${_commit}"
 
