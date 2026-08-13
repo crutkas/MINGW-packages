@@ -67,7 +67,6 @@ jobs:
           install: git python base-devel
           update: true
           release: true
-          location: 'D:\M'
 
       - name: Add staging repo
         shell: msys2 {0}
