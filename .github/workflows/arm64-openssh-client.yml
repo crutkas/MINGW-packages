@@ -92,7 +92,7 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          test "$(uname -m)" = aarch64
+          uname -a
           mkdir -p artifacts
           cd "$PACKAGE_DIRECTORY"
           MINGW_ARCH=clangarm64 makepkg-mingw \
