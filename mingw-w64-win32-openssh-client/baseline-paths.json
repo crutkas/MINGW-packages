@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "repository": "crutkas/build-extra",
+    "pullRequest": 1,
+    "revision": "9e8e3eb929ae5c7fe8a2d899be2eefdc07356c19",
+    "manifest": "arm64-payload-architecture-v2.55.0.4.tsv"
+  },
+  "package": {
+    "name": "mingw-w64-clang-aarch64-win32-openssh-client",
+    "architecture": "aarch64",
+    "coffMachine": "0xAA64"
+  },
+  "paths": [
+    {
+      "baselinePath": "usr/bin/scp.exe",
+      "disposition": "replace",
+      "packagePath": "usr/bin/scp.exe"
+    },
+    {
+      "baselinePath": "usr/bin/sftp.exe",
+      "disposition": "replace",
+      "packagePath": "usr/bin/sftp.exe"
+    },
+    {
+      "baselinePath": "usr/bin/ssh-add.exe",
+      "disposition": "replace",
+      "packagePath": "usr/bin/ssh-add.exe"
+    },
+    {
+      "baselinePath": "usr/bin/ssh-agent.exe",
+      "disposition": "replace",
+      "packagePath": "usr/bin/ssh-agent.exe"
+    },
+    {
+      "baselinePath": "usr/bin/ssh-keygen.exe",
+      "disposition": "replace",
+      "packagePath": "usr/bin/ssh-keygen.exe"
+    },
+    {
+      "baselinePath": "usr/bin/ssh-keyscan.exe",
+      "disposition": "replace",
+      "packagePath": "usr/bin/ssh-keyscan.exe"
+    },
+    {
+      "baselinePath": "usr/bin/ssh.exe",
+      "disposition": "replace",
+      "packagePath": "usr/bin/ssh.exe"
+    },
+    {
+      "baselinePath": "usr/lib/ssh/sftp-server.exe",
+      "disposition": "replace",
+      "packagePath": "usr/lib/ssh/sftp-server.exe"
+    },
+    {
+      "baselinePath": "usr/lib/ssh/ssh-keysign.exe",
+      "disposition": "remove",
+      "packagePath": null,
+      "reason": "Win32 OpenSSH does not build ssh-keysign; Windows host-based authentication is unsupported."
+    },
+    {
+      "baselinePath": "usr/lib/ssh/ssh-pkcs11-helper.exe",
+      "disposition": "replace",
+      "packagePath": "usr/lib/ssh/ssh-pkcs11-helper.exe"
+    },
+    {
+      "baselinePath": "usr/lib/ssh/ssh-sk-helper.exe",
+      "disposition": "replace",
+      "packagePath": "usr/lib/ssh/ssh-sk-helper.exe"
+    }
+  ],
+  "runtimeColocation": [
+    {
+      "packagePath": "usr/bin/ssh-pkcs11-helper.exe",
+      "loader": "usr/bin/ssh.exe"
+    },
+    {
+      "packagePath": "usr/bin/ssh-sk-helper.exe",
+      "loader": "usr/bin/ssh.exe"
+    },
+    {
+      "packagePath": "usr/bin/libcrypto.dll",
+      "loader": "usr/bin/ssh.exe"
+    },
+    {
+      "packagePath": "usr/lib/ssh/libcrypto.dll",
+      "loader": "usr/lib/ssh/sftp-server.exe"
+    }
+  ]
+}
