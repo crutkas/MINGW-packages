@@ -20,3 +20,19 @@
  endif
  
  PROCESSOR_ARCHITECTURE  ?= x86
+--- build-x86_64-perl-5.32.1/win32/config_sh.PL.orig	2021-07-19 11:39:52.573976600 -0700
++++ build-x86_64-perl-5.32.1/win32/config_sh.PL	2021-07-19 11:47:05.542748000 -0700
+@@ -222,5 +222,12 @@
+ unless ($opt{cc} =~ /\bcl/) {
+-    if ($opt{WIN64} eq 'define') {
++    if ($opt{archname} =~ /-arm64(?:-|$)/) {
++        $opt{longdblsize} = 8;
++        $opt{longdblkind} = 0;
++        $opt{longdblmantbits} = 52;
++        $opt{longdblinfbytes} = '0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x7f';
++        $opt{longdblnanbytes} = '0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f';
++    }
++    elsif ($opt{WIN64} eq 'define') {
+         $opt{longdblsize} = 16;
+         $opt{longdblinfbytes} = '0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xff, 0x7f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00';
+         $opt{longdblnanbytes} = '0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00';

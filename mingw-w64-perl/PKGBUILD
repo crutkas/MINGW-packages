@@ -14,7 +14,7 @@ pkgname=("${MINGW_PACKAGE_PREFIX}-${_realname}"
 # provides array, then repackage.
 pkgver="5.38.2"
 #       v    ^
-pkgrel=1
+pkgrel=2
 pkgdesc="A highly capable, feature-rich programming language (mingw-w64)"
 arch=('any')
 mingw_arch=('mingw64' 'ucrt64' 'clang64' 'clangarm64')
@@ -64,7 +64,7 @@ sha256sums=('d91115e90b896520e83d4de6b52f8254ef2b70a8d545ffab33200ea9f1cf29e8'
             '64b7dfd31b2881be30bf86ad05bd8232537bf97fbe4b0611df89c085b2d3b14d'
             '68fc914809ab3402ed2afed110c18ae2934500026c23669e1e543edc58df45a2'
             '749e96f97a162c53f4cf7bda83d1b18f4d3e587e7980e07f5e8968943d6ea774'
-            '7861675f02698537f3ea99230b0d95ba9581253df258ebb81a528a3861b485ce'
+            '1892ef6f2d7b282b18a73c7661baa6a24109fea64a28c7756b7ff92b7e747c2a'
             'b6fbca2f89ee4bae4f28321759c76078f1d1de574d9bceb7eae033ca3d3626c0')
 ## Populated by the updpkgprovs script
 provides=(
