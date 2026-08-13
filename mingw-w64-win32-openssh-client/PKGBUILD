@@ -47,6 +47,8 @@ prepare() {
   _assert_native_arm64
 
   cd "${srcdir}/openssh-portable-${_openssh_revision}"
+  # Win32's build helper discovers its repository root through git.
+  git init -q .
   patch -Np1 -i \
     "${srcdir}/Win32-OpenSSH-${_automation_revision}/eng/openssh-portable-v10.0.0.0-vcpkg.patch"
 
