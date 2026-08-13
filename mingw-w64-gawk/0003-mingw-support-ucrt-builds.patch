@@ -1,0 +1,143 @@
+From 6042421a5a8b43fb705f3515a6accc9add9aa4cb Mon Sep 17 00:00:00 2001
+From: Clint Rutkas <crutkas@microsoft.com>
+Date: Thu, 13 Aug 2026 12:10:00 -0700
+Subject: [PATCH 3/3] mingw: support UCRT builds under MSYS make
+
+Use the path separator expected by the MSYS-hosted make used to build
+native MinGW packages. Include the header that exposes __mb_cur_max and
+handle UCRT's opaque public FILE definition using the stream layout and
+error flag used by current gnulib.
+---
+ missing_d/stdio-consolesafe.c | 21 ++++++++++++++++++++-
+ pc/Makefile                   |  2 +-
+ pc/mbc32.h                    |  2 ++
+ pc/nl_langinfo.c              |  5 +++--
+ pc/popen.c                    |  4 ++--
+ replace.c                     |  2 +-
+ 6 files changed, 31 insertions(+), 7 deletions(-)
+
+diff --git a/missing_d/stdio-consolesafe.c b/missing_d/stdio-consolesafe.c
+index eb9f1f54..84ec5904 100644
+--- a/missing_d/stdio-consolesafe.c
++++ b/missing_d/stdio-consolesafe.c
+@@ -122,10 +122,31 @@ vasprintf (char **resultp, const char *format, va_list args)
+ 
+ # endif
+ 
++# ifdef _UCRT
++struct gawk_real_FILE
++{
++  unsigned char *_ptr;
++  unsigned char *_base;
++  int _cnt;
++  int _flag;
++  int _file;
++  int _charbuf;
++  int _bufsiz;
++};
++
++#  define GAWK_IOERR 0x10
++# else
++#  define GAWK_IOERR _IOERR
++# endif
++
+ static void
+ fseterr (FILE *fp)
+ {
+-  fp->_flag |= _IOERR;
++# ifdef _UCRT
++  ((struct gawk_real_FILE *) fp)->_flag |= GAWK_IOERR;
++# else
++  fp->_flag |= GAWK_IOERR;
++# endif
+ }
+ 
+ /* Bypass the functions __mingw_[v][f]printf, that trigger a bug in msvcrt,
+diff --git a/pc/Makefile b/pc/Makefile
+index 7557ff3c..0caeaa68 100644
+--- a/pc/Makefile
++++ b/pc/Makefile
+@@ -89,6 +89,6 @@ DO_BIND= $($(BIND))
+ #------------------------------------------------------------------------
+ # To allow Make find files in the support subdirectory.
+-VPATH = .;./support;./support/malloc
++VPATH = .:./support:./support/malloc
+ #========================================================================
+ # End of general configuration. Some platform-specific configuration
+ # notes appear below.
+diff --git a/pc/mbc32.h b/pc/mbc32.h
+index 79e2c995..8fec021b 100644
+--- a/pc/mbc32.h
++++ b/pc/mbc32.h
+@@ -34,6 +34,8 @@
+ #ifndef MBC32_H
+ #define MBC32_H
+ 
++#include <_mingw.h>
++
+ /* MinGW64 build linked against UCRT has somne of this in its library,
+    via uchar.h.  */
+ #ifdef _UCRT
+diff --git a/pc/nl_langinfo.c b/pc/nl_langinfo.c
+index e331d57d..ee547a35 100644
+--- a/pc/nl_langinfo.c
++++ b/pc/nl_langinfo.c
+@@ -23,8 +23,11 @@
+  */
+ 
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <stdbool.h>
+ #include <ctype.h>
+ #include <locale.h>
+ #include <langinfo.h>
++_CRTIMP int __cdecl ___mb_cur_max_func (void);
++
+ #define WIN32_LEAN_AND_MEAN
+@@ -146,8 +149,5 @@ mingw_mb_cur_max (void)
+ {
+   if (mingw_using_utf8 (UTF8_QUERY))
+     return 4;
+-  /* __mb_cur_max is either a macro defined to call an internal CRT
+-     function, or an internal variable of CRT that is updated when
+-     setlocale is called.  */
+-  return __mb_cur_max;
++  return ___mb_cur_max_func ();
+ }
+diff --git a/pc/popen.c b/pc/popen.c
+index 36d15801..d3eb6d66 100644
+--- a/pc/popen.c
++++ b/pc/popen.c
+@@ -232,7 +232,7 @@ os_popen(const char *command, const char *mode )
+     strncpy(curmode, mode, 3); curmode[3] = '\0';
+ 
+ #if defined(__MINGW32__)
+-    current = popen(command, mode);
++    current = _popen(command, mode);
+     cur = fileno(current);
+     strcpy(pipes[cur].pmode, curmode);
+     return(current);
+@@ -278,7 +278,7 @@ os_pclose( FILE * current)
+     int fd, rval;
+ 
+ #if defined(__MINGW32__)
+-    rval = pclose(current);
++    rval = _pclose(current);
+     *pipes[cur].pmode = '\0';
+     return rval;
+ #endif
+diff --git a/replace.c b/replace.c
+index 6dd62c65..a9fc7674 100644
+--- a/replace.c
++++ b/replace.c
+@@ -52,7 +52,7 @@
+ #include "missing_d/getaddrinfo.c"
+ #endif
+ 
+-#ifndef HAVE_STRCOLL
++#if !defined(HAVE_STRCOLL) && !defined(__MINGW32__)
+ #include "missing_d/strcoll.c"
+ #endif
+ 
+-- 
+2.51.0.windows.1

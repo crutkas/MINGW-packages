@@ -1,0 +1,93 @@
+From d2caec662b646f7af7cf6ab6c3406a8ee9f8dac8 Mon Sep 17 00:00:00 2001
+From: Clint Rutkas <crutkas@microsoft.com>
+Date: Thu, 13 Aug 2026 11:46:00 -0700
+Subject: [PATCH 2/2] mingw: relocate default paths with the executable
+
+Native Windows builds cannot use MSYS path translation, and an absolute
+build prefix makes extension loading fail after packaging. Derive the
+default awk and extension directories from gawk.exe while leaving
+AWKPATH and AWKLIBPATH overrides unchanged.
+---
+ pc/gawkmisc.pc | 43 ++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/pc/gawkmisc.pc b/pc/gawkmisc.pc
+index 630358ea..9a158784 100644
+--- a/pc/gawkmisc.pc
++++ b/pc/gawkmisc.pc
+@@ -25,6 +25,9 @@
+ const char quote = '\'';
+ const char envsep = ';';
+ 
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++
+ # ifdef DEFPATH
+ const char *defpath = DEFPATH;
+ # else
+@@ -33,6 +36,44 @@ const char *defpath = ".;c:\\lib\\awk;c:\\gnu\\lib\\awk";
+ /* the Makefile should define DEFLIBPATH */
+ const char *deflibpath = DEFLIBPATH;
+ 
++#define DEFAULT_PATH_BUFFER_SIZE (MAX_PATH + 32)
++
++static char default_awkpath[DEFAULT_PATH_BUFFER_SIZE];
++static char default_awklibpath[DEFAULT_PATH_BUFFER_SIZE];
++
++static void
++set_default_paths(void)
++{
++	char module_path[MAX_PATH];
++	char *separator;
++	DWORD length;
++	int result;
++
++	length = GetModuleFileNameA(NULL, module_path, sizeof(module_path));
++	if (length == 0 || length >= sizeof(module_path))
++		fatal(_("cannot determine the gawk executable path"));
++
++	separator = strrchr(module_path, '\\');
++	if (separator == NULL)
++		separator = strrchr(module_path, '/');
++	if (separator == NULL)
++		fatal(_("cannot determine the gawk executable directory"));
++	*separator = '\0';
++
++	result = snprintf(default_awkpath, sizeof(default_awkpath),
++			".;%s\\..\\lib\\awk", module_path);
++	if (result < 0 || result >= sizeof(default_awkpath))
++		fatal(_("the default AWKPATH is too long"));
++
++	result = snprintf(default_awklibpath, sizeof(default_awklibpath),
++			"%s\\..\\lib\\gawk", module_path);
++	if (result < 0 || result >= sizeof(default_awklibpath))
++		fatal(_("the default AWKLIBPATH is too long"));
++
++	defpath = default_awkpath;
++	deflibpath = default_awklibpath;
++}
++
+ #ifdef __MINGW32__
+ 
+ #ifdef HAVE_SOCKETS
+@@ -48,8 +89,5 @@ const char *deflibpath = DEFLIBPATH;
+ #endif
+ 
+-#define WIN32_LEAN_AND_MEAN
+-#include <windows.h>
+-
+ /* gawk_name --- pull out the "gawk" part from how the OS called us */
+ 
+ const char *
+@@ -80,5 +118,9 @@ os_arg_fixup(argcp, argvp)
+ int *argcp;
+ char ***argvp;
+ {
++	set_default_paths();
++
++	(void) argcp;
++	(void) argvp;
+ 	return;
+ }
+-- 
+2.51.0.windows.1

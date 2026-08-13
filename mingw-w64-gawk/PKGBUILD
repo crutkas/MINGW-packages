@@ -1,0 +1,95 @@
+# Maintainer: MSYS2 MinGW Packages contributors
+
+_realname=gawk
+pkgbase=mingw-w64-${_realname}
+pkgname=("${MINGW_PACKAGE_PREFIX}-${_realname}")
+pkgver=5.4.1
+pkgrel=1
+pkgdesc="GNU implementation of the AWK programming language (mingw-w64)"
+arch=('any')
+mingw_arch=('mingw32' 'mingw64' 'ucrt64' 'clang64' 'clangarm64')
+url="https://www.gnu.org/software/gawk/"
+msys2_repository_url="https://cgit.git.savannah.gnu.org/cgit/gawk.git"
+msys2_references=(
+  "cpe: cpe:/a:gnu:gawk"
+)
+license=('spdx:GPL-3.0-or-later')
+depends=("${MINGW_PACKAGE_PREFIX}-gmp"
+         "${MINGW_PACKAGE_PREFIX}-mpfr"
+         "${MINGW_PACKAGE_PREFIX}-readline")
+makedepends=("${MINGW_PACKAGE_PREFIX}-cc")
+source=("https://ftp.gnu.org/pub/gnu/${_realname}/${_realname}-${pkgver}.tar.gz"{,.sig}
+        "0001-mingw-use-configurable-compiler.patch"
+        "0002-mingw-relocate-default-paths.patch"
+        "0003-mingw-support-ucrt-builds.patch")
+sha256sums=('8b3b0ea83930311a3f30905d3ce898d32c6103c2fe20d6a90b40341171b174de'
+            'SKIP'
+            'e00e88bbd85be582967db51df3ecfd791ebdbf59dc3a0f0159c069554db008f1'
+            'e3bbd299a74948f1be5bf7d398de756f1f1126892e936a951e58643c7d60812f'
+            'f4c6da48ef84472b1a200f39b9455ccf6f800fd75322285c2028b8b7b157ef4b')
+validpgpkeys=('D1967C63788713177D861ED7DF597815937EC0D2')
+
+prepare() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+
+  patch -Np1 -i "${srcdir}/0001-mingw-use-configurable-compiler.patch"
+  patch -Np1 -i "${srcdir}/0002-mingw-relocate-default-paths.patch"
+  patch -Np1 -i "${srcdir}/0003-mingw-support-ucrt-builds.patch"
+
+  find pc -maxdepth 1 -type f ! -name 'ChangeLog*' -exec cp -f '{}' . \;
+  cp -f pc/Makefile.ext extension/Makefile
+  cp -f pc/Makefile.tst test/Makefile
+}
+
+build() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+
+  make TOOL_CC="${CC}" mingw32-readline-mpfr
+  make -C extension CC="${CC}" extensions
+}
+
+check() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+
+  local _date
+  _date="$(cygpath -m /usr/bin/date.exe)"
+  make test \
+    DATE="${_date}" \
+    SLASH=// \
+    CMP="diff -u --strip-trailing-cr"
+
+  local _expected_fail=(
+    clos1way6 close_status dbugeval4
+    devfd devfd1 devfd2 errno exitval2 fork fork2 fts functab5
+    getfile getlnhd inetdayt inetecht inf-nan-torture iolint
+    pid pipeio2 pty1 pty2 rstest4 rstest5 status-close strftime timeout
+  )
+
+  cd test
+  rm -f "${_expected_fail[@]/#/_}"
+
+  shopt -s nullglob
+  local _unexpected=(_*)
+  if (( ${#_unexpected[@]} != 0 )); then
+    printf 'Unexpected test failures:\n' >&2
+    printf '  %s\n' "${_unexpected[@]}" >&2
+    return 1
+  fi
+}
+
+package() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+
+  local _prefix
+  _prefix="$(cygpath -m "${pkgdir}${MINGW_PREFIX}")"
+  make prefix="${_prefix}" install
+
+  install -Dm755 gawk.exe \
+    "${pkgdir}${MINGW_PREFIX}/bin/gawk-${pkgver}.exe"
+  rm -f "${pkgdir}${MINGW_PREFIX}/lib/gawk/testext.dll"
+
+  install -Dm644 COPYING \
+    "${pkgdir}${MINGW_PREFIX}/share/licenses/${_realname}/COPYING"
+  install -Dm644 README_d/README.pc \
+    "${pkgdir}${MINGW_PREFIX}/share/doc/${_realname}/README.pc"
+}

@@ -1,0 +1,111 @@
+From 3c2ec04259dc72ae6ca1f7c2af166486410277d3 Mon Sep 17 00:00:00 2001
+From: Clint Rutkas <crutkas@microsoft.com>
+Date: Thu, 13 Aug 2026 11:45:00 -0700
+Subject: [PATCH 1/2] mingw: use a configurable compiler
+
+Let packagers select Clang or a target-prefixed compiler instead of
+requiring an executable named gcc.
+---
+ pc/Makefile     | 10 ++++++----
+ pc/Makefile.ext | 15 ++++++++-------
+ 2 files changed, 14 insertions(+), 11 deletions(-)
+
+diff --git a/pc/Makefile b/pc/Makefile
+index 7557ff3c..4d7eb0e7 100644
+--- a/pc/Makefile
++++ b/pc/Makefile
+@@ -97,6 +97,9 @@ VPATH = .;./support;./support/malloc
+ #========================== MINGW32 =====================================
+ #========================================================================
+ 
++TOOL_CC = gcc
++CSTD = -std=gnu17
++
+ LMINGW32 = $(CC) $(LF) -o $@ $(GAWKOBJS) $(LF2)
+ # The following might work around command-line length limitations:
+ #LMINGW32 = $(CC) $(LF) -o $@ *.o $(LF2)
+@@ -104,7 +106,7 @@ LMINGW32 = $(CC) $(LF) -o $@ $(GAWKOBJS) $(LF2)
+ 
+ mingw32:
+ 	$(MAK) all \
+-	CC=gcc O=.o CF="-D__USE_MINGW_ANSI_STDIO -gdwarf-2 -g3 -Wno-deprecated-declarations" \
++	CC="$(TOOL_CC)" O=.o CF="$(CSTD) -D__USE_MINGW_ANSI_STDIO -gdwarf-2 -g3 -Wno-deprecated-declarations" \
+ 	OPT=-O2 \
+ 	OBJ=popen.o LNK=LMINGW32 LF="-gdwarf-2 -g3" \
+         LF2="-lws2_32" RSP=
+@@ -112,7 +114,7 @@ mingw32:
+ 
+ mingw32-readline:
+ 	$(MAK) all \
+-	CC=gcc O=.o \
++	CC="$(TOOL_CC)" O=.o \
+-	CF="-D__USE_MINGW_ANSI_STDIO -DHAVE_LIBREADLINE -gdwarf-2 -g3 -Wno-deprecated-declarations" \
++	CF="$(CSTD) -D__USE_MINGW_ANSI_STDIO -DHAVE_LIBREADLINE -gdwarf-2 -g3 -Wno-deprecated-declarations" \
+ 	OPT=-O2 \
+ 	OBJ=popen.o LNK=LMINGW32 LF="-gdwarf-2 -g3" \
+@@ -120,7 +122,7 @@ mingw32-readline:
+ 
+ mingw32-mpfr:
+ 	$(MAK) all \
+-	CC=gcc O=.o \
++	CC="$(TOOL_CC)" O=.o \
+-	CF="-D__USE_MINGW_ANSI_STDIO -DHAVE_MPFR -gdwarf-2 -g3 -Wno-deprecated-declarations" \
++	CF="$(CSTD) -D__USE_MINGW_ANSI_STDIO -DHAVE_MPFR -gdwarf-2 -g3 -Wno-deprecated-declarations" \
+ 	OPT=-O2 \
+ 	OBJ=popen.o LNK=LMINGW32 LF="-gdwarf-2 -g3" \
+@@ -128,7 +130,7 @@ mingw32-mpfr:
+ 
+ mingw32-readline-mpfr:
+ 	$(MAK) all \
+-	CC=gcc O=.o \
++	CC="$(TOOL_CC)" O=.o \
+-	CF="-D__USE_MINGW_ANSI_STDIO -DHAVE_LIBREADLINE -DHAVE_MPFR -gdwarf-4 -g3 -Wno-deprecated-declarations" \
++	CF="$(CSTD) -D__USE_MINGW_ANSI_STDIO -DHAVE_LIBREADLINE -DHAVE_MPFR -gdwarf-4 -g3 -Wno-deprecated-declarations" \
+ 	OPT=-O2 \
+ 	OBJ=popen.o LNK=LMINGW32 LF="-gdwarf-4 -g3" \
+diff --git a/pc/Makefile.ext b/pc/Makefile.ext
+index 94eb9fb5..57297cb8 100644
+--- a/pc/Makefile.ext
++++ b/pc/Makefile.ext
+@@ -27,6 +27,7 @@ SOEXT = dll
+ MPFR = -DHAVE_MPFR
+ MPFR_LIBS = -lmpfr -lgmp
+ 
++CC = gcc
+ CFLAGS = -I.. -DHAVE_CONFIG_H -D__USE_MINGW_ANSI_STDIO
+ LIBS = ../pc/mbc32.c ../pc/nl_langinfo.c ../missing_d/stdio-consolesafe.c
+ 
+@@ -40,24 +41,24 @@ ALL_EXTENSIONS = filefuncs.$(SOEXT) fnmatch.$(SOEXT) inplace.$(SOEXT)\
+ extensions: $(ALL_EXTENSIONS)
+ 
+ fnmatch.$(SOEXT): fnmatch.c
+-	gcc $(CFLAGS) -I../missing_d -DHAVE_FNMATCH_H -shared -gdwarf-2 -g3 -o $@ fnmatch.c $(LIBS)
++	$(CC) $(CFLAGS) -I../missing_d -DHAVE_FNMATCH_H -shared -gdwarf-2 -g3 -o $@ fnmatch.c $(LIBS)
+ 
+ intdiv.$(SOEXT): intdiv.c
+-	gcc  $(CFLAGS) $(MPFR) -shared -gdwarf-2 -g3 -o $@ intdiv.c $(LIBS) $(MPFR_LIBS)
++	$(CC) $(CFLAGS) $(MPFR) -shared -gdwarf-2 -g3 -o $@ intdiv.c $(LIBS) $(MPFR_LIBS)
+ 
+ readdir.$(SOEXT): readdir.c gawkdirfd.h
+-	gcc  $(CFLAGS) -DHAVE_DIRENT_H -shared -gdwarf-2 -g3 -o $@ readdir.c $(LIBS)
++	$(CC) $(CFLAGS) -DHAVE_DIRENT_H -shared -gdwarf-2 -g3 -o $@ readdir.c $(LIBS)
+ 
+ rwarray.$(SOEXT): rwarray.c
+-	gcc  $(CFLAGS) -shared -gdwarf-2 -g3 -o $@ rwarray.c $(LIBS) -lws2_32
++	$(CC) $(CFLAGS) -shared -gdwarf-2 -g3 -o $@ rwarray.c $(LIBS) -lws2_32
+ 
+ filefuncs.$(SOEXT): filefuncs.c stack.c stack.h gawkfts.h
+-	gcc  $(CFLAGS) -shared -gdwarf-2 -g3 -o $@ filefuncs.c stack.c $(LIBS)
++	$(CC) $(CFLAGS) -shared -gdwarf-2 -g3 -o $@ filefuncs.c stack.c $(LIBS)
+ 
+ time.$(SOEXT): time.c
+-	gcc $(CFLAGS) -DHAVE_GETSYSTEMTIMEASFILETIME  -shared -gdwarf-2 -g3 -o $@ time.c $(LIBS)
++	$(CC) $(CFLAGS) -DHAVE_GETSYSTEMTIMEASFILETIME  -shared -gdwarf-2 -g3 -o $@ time.c $(LIBS)
+ 
+ $(SIMPLE_EXTENSIONS):
+-	gcc  $(CFLAGS) -shared -gdwarf-2 -g3 -o $@ $(@:.$(SOEXT)=.c) $(LIBS)
++	$(CC) $(CFLAGS) -shared -gdwarf-2 -g3 -o $@ $(@:.$(SOEXT)=.c) $(LIBS)
+ 
+ $(ALL_EXTENSIONS): ../gawkapi.h ../gettext.h ../pc/mbc32.c ../missing_d/stdio-consolesafe.c
+-- 
+2.51.0.windows.1
