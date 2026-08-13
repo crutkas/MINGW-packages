@@ -113,8 +113,26 @@ jobs:
           first_hash=$(sha256sum "$first" | cut -d' ' -f1)
           second_hash=$(sha256sum "$package" | cut -d' ' -f1)
           printf 'first=%s\nsecond=%s\n' "$first_hash" "$second_hash"
-          test "$first_hash" = "$second_hash"
           printf '%s  %s\n' "$first_hash" "$package" >../artifacts/SHA256SUMS
+          if test "$first_hash" = "$second_hash"; then
+            printf 'yes\n' >../artifacts/reproducible.txt
+          else
+            printf 'no\n' >../artifacts/reproducible.txt
+            cp "$package" "../artifacts/second-$package"
+            mkdir -p ../artifacts/repro-first ../artifacts/repro-second
+            bsdtar -xf "$first" -C ../artifacts/repro-first
+            bsdtar -xf "$package" -C ../artifacts/repro-second
+            (
+              cd ../artifacts/repro-first
+              find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+            ) >../artifacts/repro-first.sha256
+            (
+              cd ../artifacts/repro-second
+              find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+            ) >../artifacts/repro-second.sha256
+            diff -ru ../artifacts/repro-first ../artifacts/repro-second \
+              >../artifacts/repro-diff.txt || true
+          fi
 
       - name: Install package and verify pacman ownership
         shell: msys2 {0}
@@ -210,9 +228,16 @@ jobs:
 
       - name: Upload fork-local package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
           name: native-arm64-win32-openssh-client
           path: artifacts
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+      - name: Enforce clean-build reproducibility
+        if: always()
+        shell: msys2 {0}
+        run: |
+          test "$(cat artifacts/reproducible.txt)" = yes
