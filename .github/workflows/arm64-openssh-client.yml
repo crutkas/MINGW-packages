@@ -203,6 +203,11 @@ jobs:
           $automation = Join-Path $packageSource "Win32-OpenSSH-$automationRevision"
           $smoke = Join-Path $env:RUNNER_TEMP 'installed-client-smoke'
           Copy-Item $build $smoke -Recurse -Force
+          $openSshRegistryPath = 'HKLM:\SOFTWARE\OpenSSH'
+          $registryKeyCreated = -not (Test-Path $openSshRegistryPath)
+          if ($registryKeyCreated) {
+            New-Item $openSshRegistryPath -Force | Out-Null
+          }
 
           $installedBin = 'C:\msys64\usr\bin'
           foreach ($name in @(
@@ -215,9 +220,16 @@ jobs:
           Copy-Item 'C:\msys64\usr\lib\ssh\sftp-server.exe' `
             (Join-Path $smoke 'sftp-server.exe') -Force
 
-          & "$automation\tests\Invoke-OpenSSHClientSmoke.ps1" `
-            -BuildDirectory $smoke `
-            -GitExecutable 'C:\msys64\usr\bin\git.exe'
+          try {
+            & "$automation\tests\Invoke-OpenSSHClientSmoke.ps1" `
+              -BuildDirectory $smoke `
+              -GitExecutable 'C:\msys64\usr\bin\git.exe'
+          }
+          finally {
+            if ($registryKeyCreated) {
+              & reg.exe delete 'HKLM\SOFTWARE\OpenSSH' /f | Out-Null
+            }
+          }
 
       - name: Collect machine-readable metadata
         shell: pwsh
