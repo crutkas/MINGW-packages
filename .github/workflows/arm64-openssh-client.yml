@@ -38,9 +38,12 @@ jobs:
           }
           $pkgbuild = Get-Content "$env:PACKAGE_DIRECTORY\PKGBUILD" -Raw
           foreach ($pin in @(
-            'crutkas/Win32-OpenSSH/archive/01cfe49d781acc5f44ca9239a3a2407f5f8f9026.tar.gz',
-            'PowerShell/openssh-portable/archive/b8c08ef9da9450a94a9c5ef717d96a7bd83f3332.tar.gz',
-            'microsoft/vcpkg.git#commit=16fa044f80dd984c24deff5b7d0457e64c85a1e0'
+            '_automation_revision=01cfe49d781acc5f44ca9239a3a2407f5f8f9026',
+            '_openssh_revision=b8c08ef9da9450a94a9c5ef717d96a7bd83f3332',
+            '_vcpkg_revision=16fa044f80dd984c24deff5b7d0457e64c85a1e0',
+            'github.com/crutkas/Win32-OpenSSH/archive/${_automation_revision}.tar.gz',
+            'github.com/PowerShell/openssh-portable/archive/${_openssh_revision}.tar.gz',
+            'github.com/microsoft/vcpkg.git#commit=${_vcpkg_revision}'
           )) {
             if (-not $pkgbuild.Contains($pin)) {
               throw "Required immutable source pin '$pin' is missing."
