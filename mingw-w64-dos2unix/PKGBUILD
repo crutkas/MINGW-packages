@@ -1,0 +1,62 @@
+# Maintainer: Clint Rutkas <crutkas@microsoft.com>
+
+_realname=dos2unix
+pkgbase=mingw-w64-${_realname}
+pkgname="${MINGW_PACKAGE_PREFIX}-${_realname}"
+pkgver=7.5.6
+pkgrel=1
+pkgdesc="Text file format converter (mingw-w64)"
+arch=('any')
+mingw_arch=('mingw32' 'mingw64' 'ucrt64' 'clang64' 'clangarm64')
+url="https://waterlander.net/dos2unix/"
+license=('spdx:BSD-2-Clause')
+depends=("${MINGW_PACKAGE_PREFIX}-gettext-runtime"
+         "${MINGW_PACKAGE_PREFIX}-libiconv")
+makedepends=("${MINGW_PACKAGE_PREFIX}-cc"
+             "${MINGW_PACKAGE_PREFIX}-gettext-tools"
+             "perl")
+source=("https://waterlander.net/${_realname}/files/${_realname}-${pkgver}.tar.gz"
+        "0001-default-to-UTF-8-messages-in-MSYS-terminals.patch")
+sha256sums=('63650acbd0c7fa8623429bcbf93a888e3351a1cad0f556cf41876f5673dd7d0b'
+            '71e9ab5ac27d1e967246e37cd52b46ad38eae4cfdff6737a97184e3936268f7e')
+
+_make() {
+  local d2u_os=mingw64
+  [[ "${MINGW_CHOST}" == i686-* ]] && d2u_os=mingw32
+
+  make \
+    D2U_OS="${d2u_os}" \
+    d2u_os=MINGW \
+    CC="${CC}" \
+    prefix="${MINGW_PREFIX}" \
+    CFLAGS_OS="-I${MINGW_PREFIX}/include" \
+    CRT_GLOB_OBJ="${MINGW_PREFIX}/lib/CRT_glob.o" \
+    "$@"
+}
+
+prepare() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+  patch -Np1 -i "${srcdir}/0001-default-to-UTF-8-messages-in-MSYS-terminals.patch"
+}
+
+build() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+  _make DEBUG=1
+}
+
+check() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+  MSYSTEM=MINGW _make test
+}
+
+package() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+  _make DESTDIR="${pkgdir}" install
+
+  install -Dm755 "${pkgdir}${MINGW_PREFIX}/bin/dos2unix.exe" \
+    "${pkgdir}${MINGW_PREFIX}/bin/d2u.exe"
+  install -Dm755 "${pkgdir}${MINGW_PREFIX}/bin/unix2dos.exe" \
+    "${pkgdir}${MINGW_PREFIX}/bin/u2d.exe"
+  install -Dm644 COPYING.txt \
+    "${pkgdir}${MINGW_PREFIX}/share/licenses/${_realname}/LICENSE"
+}

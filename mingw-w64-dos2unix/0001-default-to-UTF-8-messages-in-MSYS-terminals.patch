@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Clint Rutkas <crutkas@microsoft.com>
+Date: Thu, 13 Aug 2026 11:05:00 -0700
+Subject: [PATCH] Default to UTF-8 messages in MSYS terminals
+
+The MinGW build defaults to the Windows ANSI code page, which corrupts
+translated diagnostics in the UTF-8 terminal used by MSYS2 and Git Bash.
+Default to UTF-8 and write UTF-8 bytes directly when stdout or stderr is
+redirected through an MSYS pseudo-terminal.
+---
+ common.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/common.c b/common.c
+--- a/common.c
++++ b/common.c
+@@ -55,4 +55,4 @@
+ /* global variables */
+ #ifdef D2U_UNIFILE
+-int d2u_display_encoding = D2U_DISPLAY_ANSI ;
++int d2u_display_encoding = D2U_DISPLAY_UTF8;
+ #endif
+@@ -212,4 +212,18 @@ void d2u_utf8_fprintf( FILE *stream, const char* format, ... ) {
++   if (! isatty(fileno(stream))) {
++      prevmode = _setmode(_fileno(stream), _O_BINARY);
++      if (! BOM_printed) {
++         if (d2u_display_encoding == D2U_DISPLAY_UTF8BOM)
++            fputs("\xEF\xBB\xBF", stream);
++         BOM_printed = 1;
++      }
++      fputs(buf, stream);
++      fflush(stream);
++      _setmode(_fileno(stream), prevmode);
++      va_end(args);
++      return;
++   }
++
+    /* A disadvantage of this method is that all non-ASCII characters are printed
+       wrongly when the console uses raster font (which is the default).
+       When I switch the system ANSI code page to 936 (Simplified Chinese) or 932 (Japanese)
+       I see lot of flickering in the console when I print UTF-8.
