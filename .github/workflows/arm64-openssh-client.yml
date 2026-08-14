@@ -207,12 +207,7 @@ jobs:
           $automation = Join-Path $sourceRoot "Win32-OpenSSH-$automationRevision"
           $support = 'test-support'
           New-Item $support -ItemType Directory -Force | Out-Null
-          foreach ($name in @(
-            'libcrypto.dll', 'sshd.exe', 'sshd-auth.exe',
-            'sshd-session.exe', 'ssh-shellhost.exe'
-          )) {
-            Copy-Item (Join-Path $build $name) $support -Force
-          }
+          Copy-Item "$build\*" $support -Recurse -Force
           Copy-Item "$automation\tests\Invoke-OpenSSHClientSmoke.ps1" $support -Force
 
       - name: Upload ephemeral server test support
