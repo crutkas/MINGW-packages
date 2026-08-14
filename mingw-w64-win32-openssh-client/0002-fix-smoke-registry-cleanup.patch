@@ -1,7 +1,15 @@
 diff --git a/tests/Invoke-OpenSSHClientSmoke.ps1 b/tests/Invoke-OpenSSHClientSmoke.ps1
-index a3fd81b..6cd554a 100644
+index a3fd81b..d715cb2 100644
 --- a/tests/Invoke-OpenSSHClientSmoke.ps1
 +++ b/tests/Invoke-OpenSSHClientSmoke.ps1
+@@ -132,3 +132,7 @@
+ try {
+     $null = New-Item -ItemType Directory -Path $testRoot -Force
++    & icacls.exe $testRoot /grant '*S-1-5-18:(OI)(CI)F' | Out-Null
++    if ($LASTEXITCODE -ne 0) {
++        throw "Failed to grant LocalSystem access to '$testRoot'."
++    }
+     $null = New-Item -ItemType Directory -Path $profileSshDirectory -Force
 @@ -453,3 +453,3 @@ finally {
      if (-not $openSshRegistryKeyExisted) {
 -        Remove-Item -Path $openSshRegistryPath -Force -ErrorAction SilentlyContinue
