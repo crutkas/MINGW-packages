@@ -2,15 +2,12 @@ name: Native ARM64 Win32 OpenSSH package
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - crutkas-package-arm64-openssh
 
 permissions:
   contents: read
 
 env:
-  MSYS2_INSTALLER_URL: https://github.com/msys2/msys2-installer/releases/download/nightly-x86_64/msys2-arm64-latest.exe
+  MSYS2_INSTALLER_URL: https://github.com/crutkas/MINGW-packages/releases/download/arm64-msys2-bootstrap-20260813/msys2-arm64-20260813.exe
   MSYS2_INSTALLER_SHA256: 663caacbcc0351bc549760cfca92ef6a51ff5482129490c7b2d5baa5b247d4e2
   SOURCE_DATE_EPOCH: 1761523200
   PACKAGE_DIRECTORY: mingw-w64-win32-openssh-client
