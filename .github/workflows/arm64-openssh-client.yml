@@ -297,7 +297,7 @@ jobs:
           if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64') {
             throw 'The smoke workflow is not running on native Windows ARM64.'
           }
-          $smoke = Join-Path $env:RUNNER_TEMP 'installed-client-smoke'
+          $smoke = Join-Path $env:GITHUB_WORKSPACE 'installed-client-smoke'
           New-Item $smoke -ItemType Directory -Force | Out-Null
           Copy-Item 'test-support\*' $smoke -Recurse -Force
 
@@ -311,10 +311,34 @@ jobs:
           }
           Copy-Item 'C:\msys64\usr\lib\ssh\sftp-server.exe' `
             (Join-Path $smoke 'sftp-server.exe') -Force
+          & icacls.exe $smoke /grant '*S-1-5-18:(OI)(CI)RX' /t /c | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to grant LocalSystem access to '$smoke'."
+          }
 
           & 'test-support\Invoke-OpenSSHClientSmoke.ps1' `
             -BuildDirectory $smoke `
             -GitExecutable 'C:\msys64\usr\bin\git.exe'
+
+      - name: Capture service diagnostics on failure
+        if: failure()
+        shell: powershell
+        run: |
+          New-Item smoke-logs -ItemType Directory -Force | Out-Null
+          Get-WinEvent -FilterHashtable @{
+            LogName = 'System'
+            StartTime = (Get-Date).AddMinutes(-15)
+          } -ErrorAction SilentlyContinue |
+            Where-Object Message -Match 'ssh|service' |
+            Format-List TimeCreated, Id, ProviderName, LevelDisplayName, Message |
+            Out-File smoke-logs\system-events.txt
+          Get-WinEvent -FilterHashtable @{
+            LogName = 'Application'
+            StartTime = (Get-Date).AddMinutes(-15)
+          } -ErrorAction SilentlyContinue |
+            Where-Object Message -Match 'ssh' |
+            Format-List TimeCreated, Id, ProviderName, LevelDisplayName, Message |
+            Out-File smoke-logs\application-events.txt
 
       - name: Upload smoke logs on failure
         if: failure()
