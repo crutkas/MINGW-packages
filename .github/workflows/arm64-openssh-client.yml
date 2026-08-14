@@ -315,7 +315,7 @@ jobs:
           }
           $smoke = Join-Path $env:GITHUB_WORKSPACE 'installed-client-smoke'
           $staging = Join-Path $smoke 'package-staging'
-          $portableTree = Join-Path $smoke "portable tree-$([char]0x03A9)"
+          $portableTree = Join-Path $smoke 'portable-tree'
           New-Item $staging -ItemType Directory -Force | Out-Null
           $package = Get-Item "artifacts\$env:PACKAGE_NAME-*.pkg.tar.zst"
           tar -xf $package.FullName -C $staging
