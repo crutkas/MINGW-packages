@@ -10,8 +10,19 @@ DIR="$( cd "$( dirname "$0" )" && pwd )"
 
 # Configure
 mkdir artifacts
-git remote add upstream 'https://github.com/MSYS2/MINGW-packages'
-git fetch --quiet upstream
+ci_base_repository="${CI_BASE_REPOSITORY:-crutkas/MINGW-packages}"
+ci_base_branch="${CI_BASE_BRANCH:-woarm64}"
+case "${ci_base_repository}" in
+    crutkas/*) ;;
+    *)
+        echo "CI base repository must belong to crutkas: ${ci_base_repository}" >&2
+        exit 1
+        ;;
+esac
+git remote remove upstream 2>/dev/null || :
+git remote add upstream "https://github.com/${ci_base_repository}.git"
+git fetch --quiet upstream "${ci_base_branch}"
+git update-ref refs/remotes/upstream/master FETCH_HEAD
 # reduce time required to install packages by disabling pacman's disk space checking
 sed -i 's/^CheckSpace/#CheckSpace/g' /etc/pacman.conf
 
