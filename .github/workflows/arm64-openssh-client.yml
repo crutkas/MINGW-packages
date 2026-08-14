@@ -306,7 +306,7 @@ jobs:
           }
           Copy-Item 'C:\msys64\usr\lib\ssh\sftp-server.exe' `
             (Join-Path $smoke 'sftp-server.exe') -Force
-          & icacls.exe $smoke /grant '*S-1-5-18:(OI)(CI)RX' /t /c | Out-Null
+          & icacls.exe $smoke /grant '*S-1-5-18:(OI)(CI)F' /t /c | Out-Null
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to grant LocalSystem access to '$smoke'."
           }

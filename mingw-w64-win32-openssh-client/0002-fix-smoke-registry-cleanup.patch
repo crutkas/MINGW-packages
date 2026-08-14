@@ -1,8 +1,9 @@
 diff --git a/tests/Invoke-OpenSSHClientSmoke.ps1 b/tests/Invoke-OpenSSHClientSmoke.ps1
-index a3fd81b..d715cb2 100644
+index cfbe725..50b1155 100644
 --- a/tests/Invoke-OpenSSHClientSmoke.ps1
 +++ b/tests/Invoke-OpenSSHClientSmoke.ps1
-@@ -132,3 +132,7 @@
+@@ -131,6 +131,10 @@ $oldGitSshVariant = $env:GIT_SSH_VARIANT
+ 
  try {
      $null = New-Item -ItemType Directory -Path $testRoot -Force
 +    & icacls.exe $testRoot /grant '*S-1-5-18:(OI)(CI)F' | Out-Null
@@ -10,8 +11,26 @@ index a3fd81b..d715cb2 100644
 +        throw "Failed to grant LocalSystem access to '$testRoot'."
 +    }
      $null = New-Item -ItemType Directory -Path $profileSshDirectory -Force
-@@ -453,3 +453,3 @@ finally {
+ 
+     if (Test-Path $profileConfig -PathType Leaf) {
+@@ -361,8 +365,11 @@ try {
+         )
+         $agentServiceCreated = $true
+     }
++    Write-Host 'Starting native ssh-agent service.'
+     Start-Service -Name ssh-agent
++    Write-Host 'Adding ED25519 key to native ssh-agent.'
+     Invoke-Checked -FilePath $sshAdd -ArgumentList @($clientKey)
++    Write-Host 'Native ssh-agent accepted the ED25519 key.'
+     $agentKeys = Invoke-Checked -FilePath $sshAdd -ArgumentList @('-l')
+     if (-not ($agentKeys -match 'ED25519')) {
+         throw 'ssh-agent did not retain the ED25519 key.'
+@@ -451,7 +458,7 @@ finally {
+         Remove-ItemProperty -Path $openSshRegistryPath -Name DefaultShell -ErrorAction SilentlyContinue
+     }
      if (-not $openSshRegistryKeyExisted) {
 -        Remove-Item -Path $openSshRegistryPath -Force -ErrorAction SilentlyContinue
 +        & reg.exe delete 'HKLM\SOFTWARE\OpenSSH' /f 2>$null | Out-Null
      }
+ 
+     if (-not $succeeded -and $sshdLog -and (Test-Path $sshdLog) -and $env:GITHUB_WORKSPACE) {
