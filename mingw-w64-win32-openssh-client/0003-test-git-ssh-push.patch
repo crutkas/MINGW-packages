@@ -1,0 +1,34 @@
+diff --git a/tests/Invoke-OpenSSHClientSmoke.ps1 b/tests/Invoke-OpenSSHClientSmoke.ps1
+index 50b1155..03cb152 100644
+--- a/tests/Invoke-OpenSSHClientSmoke.ps1
++++ b/tests/Invoke-OpenSSHClientSmoke.ps1
+@@ -378,6 +378,6 @@ try {
+     'first' | Set-Content -Path (Join-Path $seedRepository 'payload.txt') -Encoding ascii
+     Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $seedRepository, 'add', 'payload.txt')
+     Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $seedRepository, 'commit', '-m', 'initial')
+-    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('init', '--bare', $remoteRepository)
++    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('init', '--bare', '-b', 'main', $remoteRepository)
+     Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $seedRepository, 'remote', 'add', 'origin', $remoteRepository)
+     Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $seedRepository, 'push', '-u', 'origin', 'main')
+@@ -399,6 +399,19 @@ try {
+-
++    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'reset', '--hard', 'origin/main')
++    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'config', 'user.name', 'ARM64 OpenSSH CI')
++    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'config', 'user.email', 'arm64-openssh-ci@example.invalid')
++    'third' | Set-Content -Path (Join-Path $cloneRepository 'payload.txt') -Encoding ascii
++    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'add', 'payload.txt')
++    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'commit', '-m', 'ssh push')
++    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'push', 'origin', 'main')
++    $pushedSubject = Invoke-Checked -FilePath $GitExecutable -ArgumentList @(
++        '--git-dir', $remoteRepository, 'log', '-1', '--format=%s', 'main'
++    )
++    if ($pushedSubject -ne 'ssh push') {
++        throw 'Git-over-SSH push did not update the remote repository.'
++    }
++
+     $succeeded = $true
+-    Write-Host 'Passed ARM64 OpenSSH client smoke tests: keys, config, known_hosts, ProxyCommand, agent, scp, sftp, PTY, and Git clone/fetch.'
++    Write-Host 'Passed ARM64 OpenSSH client smoke tests: keys, config, known_hosts, ProxyCommand, agent, scp, sftp, PTY, and Git clone/fetch/push.'
+ }
+ finally {
+     $env:GIT_SSH = $oldGitSsh

@@ -93,6 +93,14 @@ if ($manifest.source.revision -ne 'b8c08ef9da9450a94a9c5ef717d96a7bd83f3332' -or
     $manifest.source.vcpkgBaseline -ne '16fa044f80dd984c24deff5b7d0457e64c85a1e0') {
     throw 'The package manifest source pins are incorrect.'
 }
+if ($manifest.globalConfig.mode -ne 'executable-relative' -or
+    $manifest.globalConfig.executable -ne 'usr/bin/ssh.exe' -or
+    $manifest.globalConfig.relativePath -ne '../../etc/ssh/ssh_config' -or
+    $manifest.globalConfig.packagePath -ne 'etc/ssh/ssh_config' -or
+    $manifest.globalConfig.configurationIncluded -ne $false -or
+    $manifest.globalConfig.unknownAlgorithmBehavior -ne 'error') {
+    throw 'The package manifest portable global configuration contract is incorrect.'
+}
 
 foreach ($entry in $replaceEntries) {
     if (-not (Test-Path (Resolve-PayloadPath $entry.packagePath) -PathType Leaf)) {
@@ -143,10 +151,61 @@ foreach ($relativePath in @(
     'usr/share/licenses/win32-openssh-client/LICENSE.txt'
     'usr/share/licenses/win32-openssh-client/NOTICE.txt'
     'usr/share/doc/win32-openssh-client/ssh_config_default'
+    'usr/share/doc/win32-openssh-client/ssh_config.before'
+    'usr/share/doc/win32-openssh-client/ssh_config.after'
+    'usr/share/doc/win32-openssh-client/ssh_config.diff'
+    'usr/share/doc/win32-openssh-client/ssh_config.transform.json'
+    'usr/share/doc/win32-openssh-client/source-pins.json'
 )) {
     if (-not (Test-Path (Resolve-PayloadPath $relativePath) -PathType Leaf)) {
         throw "Required metadata '$relativePath' is missing."
     }
 }
 
-Write-Host 'Validated 11 baseline dispositions, 14 ARM64 PEs, file hashes, config, licenses, and no server payload.'
+$configPath = Resolve-PayloadPath 'etc/ssh/ssh_config'
+$beforePath = Resolve-PayloadPath 'usr/share/doc/win32-openssh-client/ssh_config.before'
+$afterPath = Resolve-PayloadPath 'usr/share/doc/win32-openssh-client/ssh_config.after'
+$transformPath = Resolve-PayloadPath 'usr/share/doc/win32-openssh-client/ssh_config.transform.json'
+$transform = Get-Content $transformPath -Raw | ConvertFrom-Json
+if ($transform.source.sha256 -ne
+        'f783f00ce880ead34b01d6db20f35f0e9141e199ffc32ca14cd330a3165853a4' -or
+    $transform.output.sha256 -ne
+        '8afa8d96895abae6a4770bde0916b985b28bef5979b016da5621d65f92e1c3de') {
+    throw 'The SSH policy transformation hashes are incorrect.'
+}
+if ((Get-FileHash $beforePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne
+        $transform.source.sha256 -or
+    (Get-FileHash $afterPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne
+        $transform.output.sha256 -or
+    (Get-FileHash $configPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne
+        $transform.output.sha256) {
+    throw 'The installed SSH policy does not match the transformation manifest.'
+}
+$removedAlgorithms = @($transform.removedAlgorithms.name | Sort-Object)
+$expectedRemovedAlgorithms = @(
+    'ssh-dss'
+    'ssh-dss-cert-v01@openssh.com'
+) | Sort-Object
+if (Compare-Object $expectedRemovedAlgorithms $removedAlgorithms) {
+    throw "Unexpected removed SSH algorithms: $($removedAlgorithms -join ', ')."
+}
+if ($transform.changes.Count -ne 1 -or
+    $transform.changes[0].directive -ne 'PubkeyAcceptedKeyTypes' -or
+    $transform.changes[0].removedSourceTokens.Count -ne 1 -or
+    $transform.changes[0].removedSourceTokens[0] -ne 'ssh-dss*') {
+    throw 'The SSH policy transformation changed an unexpected source shape.'
+}
+
+$pins = Get-Content (
+    Resolve-PayloadPath 'usr/share/doc/win32-openssh-client/source-pins.json'
+) -Raw | ConvertFrom-Json
+if ($pins.automation.repository -ne 'crutkas/Win32-OpenSSH' -or
+    $pins.automation.pullRequest -ne 2 -or
+    $pins.automation.revision -ne
+        'e20e4eca0ad3ed513b9c05bdd03fba86e7cb3947' -or
+    $pins.automation.archiveSha256 -ne
+        '077c2d1ff0c876915f3716d47dcbc963121ed45cbb408b8cd53cbbee045322bd') {
+    throw 'The fork-local source provenance is incorrect.'
+}
+
+Write-Host 'Validated fork-local source pins, 11 baseline dispositions, 14 ARM64 PEs, per-file hashes, transformed config, licenses, and no server payload.'
