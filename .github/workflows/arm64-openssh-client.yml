@@ -310,7 +310,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to grant LocalSystem access to '$smoke'."
           }
-          $env:GIT_TRACE = '1'
 
           & 'test-support\Invoke-OpenSSHClientSmoke.ps1' `
             -BuildDirectory $smoke `
