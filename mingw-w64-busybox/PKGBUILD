@@ -65,7 +65,11 @@ build() {
 }
 
 check() {
-  cd "${srcdir}/${_srcdir}/testsuite"
+  local _testdir="${srcdir}/${_srcdir}/testsuite-${MSYSTEM}"
+  rm -rf "${_testdir}"
+  mkdir -p "${_testdir}"
+  cp -R "${srcdir}/${_srcdir}/testsuite/." "${_testdir}/"
+  cd "${_testdir}"
 
   export DEBUG=true
   export LC_ALL=C.UTF-8
