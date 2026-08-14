@@ -4,7 +4,7 @@ _realname=win32-openssh-client
 pkgbase=mingw-w64-${_realname}
 pkgname="${MINGW_PACKAGE_PREFIX}-${_realname}"
 pkgver=10.0.0.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Native Win32 OpenSSH client payload for Git for Windows (ARM64)'
 arch=('any')
 mingw_arch=('clangarm64')
@@ -15,9 +15,12 @@ conflicts=('openssh')
 backup=('etc/ssh/ssh_config')
 options=('!strip' '!debug')
 
-_automation_revision=01cfe49d781acc5f44ca9239a3a2407f5f8f9026
+_automation_revision=e20e4eca0ad3ed513b9c05bdd03fba86e7cb3947
 _openssh_revision=b8c08ef9da9450a94a9c5ef717d96a7bd83f3332
 _vcpkg_revision=16fa044f80dd984c24deff5b7d0457e64c85a1e0
+_portable_global_config='../../etc/ssh/ssh_config'
+_config_source_sha256=f783f00ce880ead34b01d6db20f35f0e9141e199ffc32ca14cd330a3165853a4
+_config_output_sha256=8afa8d96895abae6a4770bde0916b985b28bef5979b016da5621d65f92e1c3de
 
 # The two third-party inputs are immutable commits pinned and validated by
 # crutkas/Win32-OpenSSH at _automation_revision.
@@ -27,17 +30,23 @@ source=(
   "vcpkg::git+https://github.com/microsoft/vcpkg.git#commit=${_vcpkg_revision}"
   '0001-enable-reproducible-linking.patch'
   '0002-fix-smoke-registry-cleanup.patch'
+  '0003-test-git-ssh-push.patch'
   'baseline-paths.json'
+  'ssh_config.git-for-windows'
+  'Transform-SshConfig.ps1'
   'README.md'
 )
 sha256sums=(
-  '856b30e382f3487ca9bc758ea9f27e07d6927d2af9b0ef73f01c7dad6064a3f1'
+  '077c2d1ff0c876915f3716d47dcbc963121ed45cbb408b8cd53cbbee045322bd'
   '45f316a54fdc0d81a2f8e503ecf78958e0ffc953936a022efc8405b7f14dae0d'
   'SKIP'
   '0a7e859d99b19a352b95b2c399f5e2c6e490ac1ae8317d0d74c4e699506d5462'
   '8d9e8843c1899e40accdb9b6b23aa301548725b3c350acc113e7ad9e70beb273'
+  '0c0d516b3914297fb7fc7b6179bbe3415dd25c0a1660d18da869f01129bafaf0'
   'd166d522a658e113ab47c317ad756a1d804a3bf644ada71277d405d62114413b'
-  'f0567a718a8746465039a50647bf0ac47524d0a9c01c21d0ca2953336773643a'
+  'f783f00ce880ead34b01d6db20f35f0e9141e199ffc32ca14cd330a3165853a4'
+  'e4cc9219215f875384995ce43edb42c24ce6117ed5ec5d873ef53b248bb8bca4'
+  '7d635a8fe6f5e2efb8360cfedd18ad09869fd49d962226d509d94778b4500b15'
 )
 
 _assert_native_arm64() {
@@ -52,12 +61,15 @@ prepare() {
 
   cd "${srcdir}/Win32-OpenSSH-${_automation_revision}"
   patch -Np1 -i "${srcdir}/0002-fix-smoke-registry-cleanup.patch"
+  patch -Np1 -i "${srcdir}/0003-test-git-ssh-push.patch"
 
   cd "${srcdir}/openssh-portable-${_openssh_revision}"
   # Win32's build helper discovers its repository root through git.
   git init -q .
   patch -Np1 -i \
     "${srcdir}/Win32-OpenSSH-${_automation_revision}/eng/openssh-portable-v10.0.0.0-vcpkg.patch"
+  patch -Np1 -l -i \
+    "${srcdir}/Win32-OpenSSH-${_automation_revision}/eng/openssh-portable-v10.0.0.0-portable-config.patch"
   patch -Np1 -i "${srcdir}/0001-enable-reproducible-linking.patch"
 
   grep -Fq "\"builtin-baseline\": \"${_vcpkg_revision}\"" \
@@ -86,6 +98,7 @@ build() {
       -destination "${destination_win}" \
       -NativeHostArch arm64 \
       -Configuration Release \
+      -PortableGlobalConfig "${_portable_global_config}" \
       -Verbose
 }
 
@@ -106,6 +119,11 @@ check() {
     -File "${automation_win}\\tests\\Invoke-OpenSSHClientSmoke.ps1" \
     -BuildDirectory "${build_win}" \
     -GitExecutable git.exe
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "${automation_win}\\tests\\Invoke-OpenSSHConfigTests.ps1" \
+    -BuildDirectory "${build_win}" \
+    -GlobalConfigMode Portable \
+    -PortableGlobalConfig "${_portable_global_config}"
 }
 
 package() {
@@ -117,9 +135,19 @@ package() {
   local automation_win
   local build_win
   local payload_win
+  local config_source_win
+  local config_output_win
+  local config_manifest_win
+  local config_diff_win
+  local transform_win
   automation_win=$(cygpath -w "${automation_dir}")
   build_win=$(cygpath -w "${source_dir}/bin/arm64/Release")
   payload_win=$(cygpath -w "${payload_dir}")
+  config_source_win=$(cygpath -w "${srcdir}/ssh_config.git-for-windows")
+  config_output_win=$(cygpath -w "${srcdir}/ssh_config.after")
+  config_manifest_win=$(cygpath -w "${srcdir}/ssh_config.transform.json")
+  config_diff_win=$(cygpath -w "${srcdir}/ssh_config.diff")
+  transform_win=$(cygpath -w "${srcdir}/Transform-SshConfig.ps1")
 
   powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
     -File "${automation_win}\\scripts\\New-OpenSSHClientPackage.ps1" \
@@ -128,10 +156,21 @@ package() {
     -SourceRevision "${_openssh_revision}" \
     -SourceRef "v${pkgver}" \
     -VcpkgBaseline "${_vcpkg_revision}" \
-    -BuildRepository 'crutkas/MINGW-packages'
+    -BuildRepository 'crutkas/MINGW-packages' \
+    -PortableGlobalConfig "${_portable_global_config}"
   powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
     -File "${automation_win}\\tests\\Test-OpenSSHClientPackage.ps1" \
     -PackageDirectory "${payload_win}"
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "${transform_win}" \
+    -SourcePath "${config_source_win}" \
+    -DestinationPath "${config_output_win}" \
+    -ManifestPath "${config_manifest_win}" \
+    -DiffPath "${config_diff_win}" \
+    -ExpectedSourceSha256 "${_config_source_sha256}"
+
+  test "$(sha256sum "${srcdir}/ssh_config.after" | cut -d' ' -f1)" = \
+    "${_config_output_sha256}"
 
   cp -a "${payload_dir}/usr" "${pkgdir}/"
 
@@ -139,8 +178,7 @@ package() {
     "${pkgdir}/usr/share/licenses/${_realname}/LICENSE.txt"
   install -Dm644 "${payload_dir}/NOTICE.txt" \
     "${pkgdir}/usr/share/licenses/${_realname}/NOTICE.txt"
-  install -Dm644 \
-    "${source_dir}/contrib/win32/win32compat/ssh_config/ssh_config" \
+  install -Dm644 "${srcdir}/ssh_config.after" \
     "${pkgdir}/etc/ssh/ssh_config"
 
   install -Dm644 "${payload_dir}/manifest.json" \
@@ -149,9 +187,42 @@ package() {
     "${pkgdir}/usr/share/doc/${_realname}/baseline-paths.json"
   install -Dm644 "${srcdir}/README.md" \
     "${pkgdir}/usr/share/doc/${_realname}/README.md"
-  install -Dm644 \
-    "${source_dir}/contrib/win32/win32compat/ssh_config/ssh_config" \
+  install -Dm644 "${srcdir}/ssh_config.after" \
     "${pkgdir}/usr/share/doc/${_realname}/ssh_config_default"
+  install -Dm644 "${srcdir}/ssh_config.git-for-windows" \
+    "${pkgdir}/usr/share/doc/${_realname}/ssh_config.before"
+  install -Dm644 "${srcdir}/ssh_config.after" \
+    "${pkgdir}/usr/share/doc/${_realname}/ssh_config.after"
+  install -Dm644 "${srcdir}/ssh_config.diff" \
+    "${pkgdir}/usr/share/doc/${_realname}/ssh_config.diff"
+  install -Dm644 "${srcdir}/ssh_config.transform.json" \
+    "${pkgdir}/usr/share/doc/${_realname}/ssh_config.transform.json"
+
+  cat >"${pkgdir}/usr/share/doc/${_realname}/source-pins.json" <<EOF
+{
+  "schemaVersion": 1,
+  "automation": {
+    "repository": "crutkas/Win32-OpenSSH",
+    "pullRequest": 2,
+    "revision": "${_automation_revision}",
+    "archiveSha256": "077c2d1ff0c876915f3716d47dcbc963121ed45cbb408b8cd53cbbee045322bd"
+  },
+  "opensshPortable": {
+    "repository": "PowerShell/openssh-portable",
+    "revision": "${_openssh_revision}",
+    "archiveSha256": "45f316a54fdc0d81a2f8e503ecf78958e0ffc953936a022efc8405b7f14dae0d"
+  },
+  "vcpkg": {
+    "repository": "microsoft/vcpkg",
+    "revision": "${_vcpkg_revision}"
+  },
+  "globalConfig": {
+    "relativeToExecutable": "${_portable_global_config}",
+    "sourceSha256": "${_config_source_sha256}",
+    "outputSha256": "${_config_output_sha256}"
+  }
+}
+EOF
 
   (
     cd "${pkgdir}"

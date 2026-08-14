@@ -35,9 +35,13 @@ jobs:
           }
           $pkgbuild = Get-Content "$env:PACKAGE_DIRECTORY\PKGBUILD" -Raw
           foreach ($pin in @(
-            '_automation_revision=01cfe49d781acc5f44ca9239a3a2407f5f8f9026',
+            '_automation_revision=e20e4eca0ad3ed513b9c05bdd03fba86e7cb3947',
             '_openssh_revision=b8c08ef9da9450a94a9c5ef717d96a7bd83f3332',
             '_vcpkg_revision=16fa044f80dd984c24deff5b7d0457e64c85a1e0',
+            "mingw_arch=('clangarm64')",
+            "_portable_global_config='../../etc/ssh/ssh_config'",
+            '_config_source_sha256=f783f00ce880ead34b01d6db20f35f0e9141e199ffc32ca14cd330a3165853a4',
+            '_config_output_sha256=8afa8d96895abae6a4770bde0916b985b28bef5979b016da5621d65f92e1c3de',
             'github.com/crutkas/Win32-OpenSSH/archive/${_automation_revision}.tar.gz',
             'github.com/PowerShell/openssh-portable/archive/${_openssh_revision}.tar.gz',
             'github.com/microsoft/vcpkg.git#commit=${_vcpkg_revision}'
@@ -160,6 +164,16 @@ jobs:
             test "$(pacman -Qoq "$path")" = "$PACKAGE_NAME"
           done
           test ! -e /usr/lib/ssh/ssh-keysign.exe
+          for path in \
+            /etc/ssh/ssh_config \
+            /usr/share/doc/win32-openssh-client/ssh_config.before \
+            /usr/share/doc/win32-openssh-client/ssh_config.after \
+            /usr/share/doc/win32-openssh-client/ssh_config.diff \
+            /usr/share/doc/win32-openssh-client/ssh_config.transform.json \
+            /usr/share/doc/win32-openssh-client/source-pins.json
+          do
+            test "$(pacman -Qoq "$path")" = "$PACKAGE_NAME"
+          done
           pacman -Ql "$PACKAGE_NAME" >artifacts/pacman-files.txt
           bsdtar -xOf "$package" .PKGINFO >artifacts/PKGINFO
           bsdtar -xOf "$package" .BUILDINFO >artifacts/BUILDINFO
@@ -170,15 +184,17 @@ jobs:
         run: |
           $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
           & "$env:PACKAGE_DIRECTORY\Test-ClientPackage.ps1" -Root $msysRoot
+          & "$env:PACKAGE_DIRECTORY\Test-PackagedSshPolicy.ps1" -Root $msysRoot
 
           $package = Get-Item "artifacts\$env:PACKAGE_NAME-*.pkg.tar.zst"
-          $relocated = Join-Path $env:RUNNER_TEMP 'relocated-openssh'
+          $relocated = Join-Path $env:RUNNER_TEMP "relocated OpenSSH-$([char]0x03A9)"
           New-Item $relocated -ItemType Directory -Force | Out-Null
           tar -xf $package.FullName -C $relocated
           if ($LASTEXITCODE -ne 0) {
             throw "Package extraction exited $LASTEXITCODE."
           }
           & "$env:PACKAGE_DIRECTORY\Test-ClientPackage.ps1" -Root $relocated
+          & "$env:PACKAGE_DIRECTORY\Test-PackagedSshPolicy.ps1" -Root $relocated
 
           & "$relocated\usr\bin\ssh.exe" -V
           if ($LASTEXITCODE -ne 0) {
@@ -196,16 +212,22 @@ jobs:
           Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\manifest.json' artifacts
           Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\baseline-paths.json' artifacts
           Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\package-files.sha256' artifacts
+          Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\source-pins.json' artifacts
+          Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\ssh_config.before' artifacts
+          Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\ssh_config.after' artifacts
+          Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\ssh_config.diff' artifacts
+          Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\ssh_config.transform.json' artifacts
 
           $sourceRoot = Join-Path $env:GITHUB_WORKSPACE "$env:PACKAGE_DIRECTORY\src"
           $sourceRevision = 'b8c08ef9da9450a94a9c5ef717d96a7bd83f3332'
-          $automationRevision = '01cfe49d781acc5f44ca9239a3a2407f5f8f9026'
+          $automationRevision = 'e20e4eca0ad3ed513b9c05bdd03fba86e7cb3947'
           $build = Join-Path $sourceRoot "openssh-portable-$sourceRevision\bin\arm64\Release"
           $automation = Join-Path $sourceRoot "Win32-OpenSSH-$automationRevision"
           $support = 'test-support'
           New-Item $support -ItemType Directory -Force | Out-Null
           Copy-Item "$build\*" $support -Recurse -Force
           Copy-Item "$automation\tests\Invoke-OpenSSHClientSmoke.ps1" $support -Force
+          Copy-Item "$env:PACKAGE_DIRECTORY\Test-PackagedSshPolicy.ps1" $support -Force
 
       - name: Upload ephemeral server test support
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -290,8 +312,15 @@ jobs:
             throw 'The smoke workflow is not running on native Windows ARM64.'
           }
           $smoke = Join-Path $env:GITHUB_WORKSPACE 'installed-client-smoke'
-          New-Item $smoke -ItemType Directory -Force | Out-Null
-          Copy-Item 'test-support\*' $smoke -Recurse -Force
+          $portableTree = Join-Path $smoke "portable tree-$([char]0x03A9)"
+          New-Item $portableTree -ItemType Directory -Force | Out-Null
+          $package = Get-Item "artifacts\$env:PACKAGE_NAME-*.pkg.tar.zst"
+          tar -xf $package.FullName -C $portableTree
+          if ($LASTEXITCODE -ne 0) {
+            throw "Package extraction exited $LASTEXITCODE."
+          }
+          $buildDirectory = Join-Path $portableTree 'usr\bin'
+          Copy-Item 'test-support\*' $buildDirectory -Recurse -Force
 
           $installedBin = 'C:\msys64\usr\bin'
           foreach ($name in @(
@@ -299,17 +328,20 @@ jobs:
             'ssh-agent.exe', 'ssh-keygen.exe', 'ssh-keyscan.exe',
             'ssh-pkcs11-helper.exe', 'ssh-sk-helper.exe', 'ssh.exe'
           )) {
-            Copy-Item (Join-Path $installedBin $name) (Join-Path $smoke $name) -Force
+            Copy-Item (Join-Path $installedBin $name) (Join-Path $buildDirectory $name) -Force
           }
           Copy-Item 'C:\msys64\usr\lib\ssh\sftp-server.exe' `
-            (Join-Path $smoke 'sftp-server.exe') -Force
-          & icacls.exe $smoke /grant '*S-1-5-18:(OI)(CI)F' /t /c | Out-Null
+            (Join-Path $buildDirectory 'sftp-server.exe') -Force
+          & icacls.exe $portableTree /grant '*S-1-5-18:(OI)(CI)F' /t /c | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to grant LocalSystem access to '$smoke'."
+            throw "Failed to grant LocalSystem access to '$portableTree'."
           }
 
+          & 'test-support\Test-PackagedSshPolicy.ps1' `
+            -Root $portableTree `
+            -KeepSecureAcl
           & 'test-support\Invoke-OpenSSHClientSmoke.ps1' `
-            -BuildDirectory $smoke `
+            -BuildDirectory $buildDirectory `
             -GitExecutable 'C:\Program Files\Git\cmd\git.exe'
 
       - name: Capture service diagnostics on failure
