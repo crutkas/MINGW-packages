@@ -310,10 +310,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to grant LocalSystem access to '$smoke'."
           }
+          $env:GIT_TRACE = '1'
 
           & 'test-support\Invoke-OpenSSHClientSmoke.ps1' `
             -BuildDirectory $smoke `
-            -GitExecutable 'C:\msys64\usr\bin\git.exe'
+            -GitExecutable 'C:\Program Files\Git\cmd\git.exe'
 
       - name: Capture service diagnostics on failure
         if: failure()
