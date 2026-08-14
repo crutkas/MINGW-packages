@@ -69,6 +69,11 @@ check() {
   rm -rf "${_testdir}"
   mkdir -p "${_testdir}"
   cp -R "${srcdir}/${_srcdir}/testsuite/." "${_testdir}/"
+  # MSYS and native MinGW can map the extracted file owner differently.
+  sed -i \
+    -e 's/^user=$(id -u)$/user=$(stat -c "%u" "$0")/' \
+    -e 's/^group=$(id -g)$/group=$(stat -c "%g" "$0")/' \
+    "${_testdir}/cpio.tests"
   cd "${_testdir}"
 
   export DEBUG=true
