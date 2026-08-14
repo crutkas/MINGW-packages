@@ -18,7 +18,7 @@ env:
 
 jobs:
   build-test-package:
-    name: Build twice, install, and test
+    name: Build twice, install, and verify
     if: github.repository == 'crutkas/MINGW-packages'
     runs-on: windows-11-arm
     timeout-minutes: 240
@@ -193,38 +193,36 @@ jobs:
             throw 'Relocated ssh-keygen.exe failed.'
           }
 
-      - name: Rerun client smoke tests from installed payload
-        shell: powershell
-        run: |
-          $packageSource = Join-Path $env:GITHUB_WORKSPACE "$env:PACKAGE_DIRECTORY\src"
-          $sourceRevision = 'b8c08ef9da9450a94a9c5ef717d96a7bd83f3332'
-          $automationRevision = '01cfe49d781acc5f44ca9239a3a2407f5f8f9026'
-          $build = Join-Path $packageSource "openssh-portable-$sourceRevision\bin\arm64\Release"
-          $automation = Join-Path $packageSource "Win32-OpenSSH-$automationRevision"
-          $smoke = Join-Path $env:RUNNER_TEMP 'installed-client-smoke'
-          Copy-Item $build $smoke -Recurse -Force
-
-          $installedBin = 'C:\msys64\usr\bin'
-          foreach ($name in @(
-            'libcrypto.dll', 'scp.exe', 'sftp.exe', 'ssh-add.exe',
-            'ssh-agent.exe', 'ssh-keygen.exe', 'ssh-keyscan.exe',
-            'ssh-pkcs11-helper.exe', 'ssh-sk-helper.exe', 'ssh.exe'
-          )) {
-            Copy-Item (Join-Path $installedBin $name) (Join-Path $smoke $name) -Force
-          }
-          Copy-Item 'C:\msys64\usr\lib\ssh\sftp-server.exe' `
-            (Join-Path $smoke 'sftp-server.exe') -Force
-
-          & "$automation\tests\Invoke-OpenSSHClientSmoke.ps1" `
-            -BuildDirectory $smoke `
-            -GitExecutable 'C:\msys64\usr\bin\git.exe'
-
       - name: Collect machine-readable metadata
         shell: pwsh
         run: |
           Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\manifest.json' artifacts
           Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\baseline-paths.json' artifacts
           Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\package-files.sha256' artifacts
+
+          $sourceRoot = Join-Path $env:GITHUB_WORKSPACE "$env:PACKAGE_DIRECTORY\src"
+          $sourceRevision = 'b8c08ef9da9450a94a9c5ef717d96a7bd83f3332'
+          $automationRevision = '01cfe49d781acc5f44ca9239a3a2407f5f8f9026'
+          $build = Join-Path $sourceRoot "openssh-portable-$sourceRevision\bin\arm64\Release"
+          $automation = Join-Path $sourceRoot "Win32-OpenSSH-$automationRevision"
+          $support = 'test-support'
+          New-Item $support -ItemType Directory -Force | Out-Null
+          foreach ($name in @(
+            'libcrypto.dll', 'sshd.exe', 'sshd-auth.exe',
+            'sshd-session.exe', 'ssh-shellhost.exe'
+          )) {
+            Copy-Item (Join-Path $build $name) $support -Force
+          }
+          Copy-Item "$automation\tests\Invoke-OpenSSHClientSmoke.ps1" $support -Force
+
+      - name: Upload ephemeral server test support
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-arm64-win32-openssh-test-support
+          path: test-support
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
       - name: Upload fork-local package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -241,3 +239,88 @@ jobs:
         shell: msys2 {0}
         run: |
           test "$(cat artifacts/reproducible.txt)" = yes
+
+  installed-client-smoke:
+    name: Test installed client on fresh ARM64 host
+    needs: build-test-package
+    if: github.repository == 'crutkas/MINGW-packages'
+    runs-on: windows-11-arm
+    timeout-minutes: 90
+
+    steps:
+      - name: Download fork-local package artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: native-arm64-win32-openssh-client
+          path: artifacts
+
+      - name: Download ephemeral server test support
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: native-arm64-win32-openssh-test-support
+          path: test-support
+
+      - name: Install SHA-256-pinned ARM64 MSYS2
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri $env:MSYS2_INSTALLER_URL -OutFile msys2-arm64.exe
+          $actual = (Get-FileHash msys2-arm64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:MSYS2_INSTALLER_SHA256) {
+            throw "MSYS2 installer SHA-256 is $actual; expected $env:MSYS2_INSTALLER_SHA256."
+          }
+          & .\msys2-arm64.exe install --confirm-command --root C:\msys64
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSYS2 installer exited $LASTEXITCODE."
+          }
+
+      - name: Configure fresh native CLANGARM64 environment
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        with:
+          msystem: CLANGARM64
+          update: true
+          release: false
+          install: git base-devel
+
+      - name: Install package
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          package=$(printf '%s\n' artifacts/"$PACKAGE_NAME"-*.pkg.tar.zst)
+          if pacman -Q openssh >/dev/null 2>&1; then
+            pacman -Rdd --noconfirm openssh
+          fi
+          pacman -U --noconfirm "$package"
+
+      - name: Rerun client smoke tests from installed payload
+        shell: powershell
+        run: |
+          if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64') {
+            throw 'The smoke workflow is not running on native Windows ARM64.'
+          }
+          $smoke = Join-Path $env:RUNNER_TEMP 'installed-client-smoke'
+          New-Item $smoke -ItemType Directory -Force | Out-Null
+          Copy-Item 'test-support\*' $smoke -Recurse -Force
+
+          $installedBin = 'C:\msys64\usr\bin'
+          foreach ($name in @(
+            'libcrypto.dll', 'scp.exe', 'sftp.exe', 'ssh-add.exe',
+            'ssh-agent.exe', 'ssh-keygen.exe', 'ssh-keyscan.exe',
+            'ssh-pkcs11-helper.exe', 'ssh-sk-helper.exe', 'ssh.exe'
+          )) {
+            Copy-Item (Join-Path $installedBin $name) (Join-Path $smoke $name) -Force
+          }
+          Copy-Item 'C:\msys64\usr\lib\ssh\sftp-server.exe' `
+            (Join-Path $smoke 'sftp-server.exe') -Force
+
+          & 'test-support\Invoke-OpenSSHClientSmoke.ps1' `
+            -BuildDirectory $smoke `
+            -GitExecutable 'C:\msys64\usr\bin\git.exe'
+
+      - name: Upload smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: installed-client-smoke-logs
+          path: smoke-logs
+          if-no-files-found: ignore
+          retention-days: 7
