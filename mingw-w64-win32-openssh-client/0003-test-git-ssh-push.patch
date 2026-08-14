@@ -10,8 +10,9 @@ index 50b1155..03cb152 100644
 +    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('init', '--bare', '-b', 'main', $remoteRepository)
      Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $seedRepository, 'remote', 'add', 'origin', $remoteRepository)
      Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $seedRepository, 'push', '-u', 'origin', 'main')
-@@ -399,6 +399,18 @@ try {
+@@ -399,6 +399,19 @@ try {
 -
++    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'reset', '--hard', 'origin/main')
 +    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'config', 'user.name', 'ARM64 OpenSSH CI')
 +    Invoke-Checked -FilePath $GitExecutable -ArgumentList @('-C', $cloneRepository, 'config', 'user.email', 'arm64-openssh-ci@example.invalid')
 +    'third' | Set-Content -Path (Join-Path $cloneRepository 'payload.txt') -Encoding ascii
