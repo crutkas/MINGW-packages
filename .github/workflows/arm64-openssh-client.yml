@@ -194,7 +194,7 @@ jobs:
           }
 
       - name: Rerun client smoke tests from installed payload
-        shell: pwsh
+        shell: powershell
         run: |
           $packageSource = Join-Path $env:GITHUB_WORKSPACE "$env:PACKAGE_DIRECTORY\src"
           $sourceRevision = 'b8c08ef9da9450a94a9c5ef717d96a7bd83f3332'
