@@ -187,12 +187,14 @@ jobs:
           & "$env:PACKAGE_DIRECTORY\Test-PackagedSshPolicy.ps1" -Root $msysRoot
 
           $package = Get-Item "artifacts\$env:PACKAGE_NAME-*.pkg.tar.zst"
+          $staging = Join-Path $env:RUNNER_TEMP 'relocated-openssh-staging'
           $relocated = Join-Path $env:RUNNER_TEMP "relocated OpenSSH-$([char]0x03A9)"
-          New-Item $relocated -ItemType Directory -Force | Out-Null
-          tar -xf $package.FullName -C $relocated
+          New-Item $staging -ItemType Directory -Force | Out-Null
+          tar -xf $package.FullName -C $staging
           if ($LASTEXITCODE -ne 0) {
             throw "Package extraction exited $LASTEXITCODE."
           }
+          Move-Item $staging $relocated
           & "$env:PACKAGE_DIRECTORY\Test-ClientPackage.ps1" -Root $relocated
           & "$env:PACKAGE_DIRECTORY\Test-PackagedSshPolicy.ps1" -Root $relocated
 
@@ -312,13 +314,15 @@ jobs:
             throw 'The smoke workflow is not running on native Windows ARM64.'
           }
           $smoke = Join-Path $env:GITHUB_WORKSPACE 'installed-client-smoke'
+          $staging = Join-Path $smoke 'package-staging'
           $portableTree = Join-Path $smoke "portable tree-$([char]0x03A9)"
-          New-Item $portableTree -ItemType Directory -Force | Out-Null
+          New-Item $staging -ItemType Directory -Force | Out-Null
           $package = Get-Item "artifacts\$env:PACKAGE_NAME-*.pkg.tar.zst"
-          tar -xf $package.FullName -C $portableTree
+          tar -xf $package.FullName -C $staging
           if ($LASTEXITCODE -ne 0) {
             throw "Package extraction exited $LASTEXITCODE."
           }
+          Move-Item $staging $portableTree
           $buildDirectory = Join-Path $portableTree 'usr\bin'
           Copy-Item 'test-support\*' $buildDirectory -Recurse -Force
 
