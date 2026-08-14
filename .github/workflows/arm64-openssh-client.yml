@@ -1,0 +1,342 @@
+name: Native ARM64 Win32 OpenSSH package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MSYS2_INSTALLER_URL: https://github.com/crutkas/MINGW-packages/releases/download/arm64-msys2-bootstrap-20260813/msys2-arm64-20260813.exe
+  MSYS2_INSTALLER_SHA256: 663caacbcc0351bc549760cfca92ef6a51ff5482129490c7b2d5baa5b247d4e2
+  SOURCE_DATE_EPOCH: 1761523200
+  PACKAGE_DIRECTORY: mingw-w64-win32-openssh-client
+  PACKAGE_NAME: mingw-w64-clang-aarch64-win32-openssh-client
+
+jobs:
+  build-test-package:
+    name: Build twice, install, and verify
+    if: github.repository == 'crutkas/MINGW-packages'
+    runs-on: windows-11-arm
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out fork-local package source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Enforce fork-local development scope
+        shell: pwsh
+        run: |
+          $remote = git remote get-url origin
+          if ($remote -notmatch '^https://github\.com/crutkas/MINGW-packages(?:\.git)?$') {
+            throw "Unexpected development remote '$remote'."
+          }
+          $pkgbuild = Get-Content "$env:PACKAGE_DIRECTORY\PKGBUILD" -Raw
+          foreach ($pin in @(
+            '_automation_revision=01cfe49d781acc5f44ca9239a3a2407f5f8f9026',
+            '_openssh_revision=b8c08ef9da9450a94a9c5ef717d96a7bd83f3332',
+            '_vcpkg_revision=16fa044f80dd984c24deff5b7d0457e64c85a1e0',
+            'github.com/crutkas/Win32-OpenSSH/archive/${_automation_revision}.tar.gz',
+            'github.com/PowerShell/openssh-portable/archive/${_openssh_revision}.tar.gz',
+            'github.com/microsoft/vcpkg.git#commit=${_vcpkg_revision}'
+          )) {
+            if (-not $pkgbuild.Contains($pin)) {
+              throw "Required immutable source pin '$pin' is missing."
+            }
+          }
+
+      - name: Install SHA-256-pinned ARM64 MSYS2
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri $env:MSYS2_INSTALLER_URL -OutFile msys2-arm64.exe
+          $actual = (Get-FileHash msys2-arm64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:MSYS2_INSTALLER_SHA256) {
+            throw "MSYS2 installer SHA-256 is $actual; expected $env:MSYS2_INSTALLER_SHA256."
+          }
+          & .\msys2-arm64.exe install --confirm-command --root C:\msys64
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSYS2 installer exited $LASTEXITCODE."
+          }
+
+      - name: Configure native CLANGARM64 environment
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        id: msys2
+        with:
+          msystem: CLANGARM64
+          update: true
+          release: false
+          install: git base-devel
+
+      - name: Verify native ARM64 build prerequisites
+        shell: pwsh
+        run: |
+          if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64') {
+            throw 'The workflow is not running on native Windows ARM64.'
+          }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $visualStudio = & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
+          if (-not $visualStudio) {
+            throw 'Visual Studio ARM64 C++ tools are not installed.'
+          }
+          $spectre = & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Runtimes.ARM64.Spectre -property installationPath
+          if (-not $spectre) {
+            throw 'The v143 ARM64 Spectre libraries are not installed.'
+          }
+
+      - name: First clean source build with tests
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          uname -a
+          mkdir -p artifacts
+          cd "$PACKAGE_DIRECTORY"
+          MINGW_ARCH=clangarm64 makepkg-mingw \
+            --syncdeps --cleanbuild --force --noconfirm --skippgpcheck
+          package=$(printf '%s\n' "$PACKAGE_NAME"-*.pkg.tar.zst)
+          cp "$package" "../artifacts/$package"
+
+      - name: Second clean source build and reproducibility check
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$PACKAGE_DIRECTORY"
+          rm -rf pkg src
+          MINGW_ARCH=clangarm64 makepkg-mingw \
+            --syncdeps --cleanbuild --force --nocheck --noconfirm --skippgpcheck
+          package=$(printf '%s\n' "$PACKAGE_NAME"-*.pkg.tar.zst)
+          first="../artifacts/$package"
+          first_hash=$(sha256sum "$first" | cut -d' ' -f1)
+          second_hash=$(sha256sum "$package" | cut -d' ' -f1)
+          printf 'first=%s\nsecond=%s\n' "$first_hash" "$second_hash"
+          printf '%s  %s\n' "$first_hash" "$package" >../artifacts/SHA256SUMS
+          if test "$first_hash" = "$second_hash"; then
+            printf 'yes\n' >../artifacts/reproducible.txt
+          else
+            printf 'no\n' >../artifacts/reproducible.txt
+            cp "$package" "../artifacts/second-$package"
+            mkdir -p ../artifacts/repro-first ../artifacts/repro-second
+            bsdtar -xf "$first" -C ../artifacts/repro-first
+            bsdtar -xf "$package" -C ../artifacts/repro-second
+            (
+              cd ../artifacts/repro-first
+              find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+            ) >../artifacts/repro-first.sha256
+            (
+              cd ../artifacts/repro-second
+              find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+            ) >../artifacts/repro-second.sha256
+            diff -ru ../artifacts/repro-first ../artifacts/repro-second \
+              >../artifacts/repro-diff.txt || true
+          fi
+
+      - name: Install package and verify pacman ownership
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          package=$(printf '%s\n' artifacts/"$PACKAGE_NAME"-*.pkg.tar.zst)
+          if pacman -Q openssh >/dev/null 2>&1; then
+            pacman -Rdd --noconfirm openssh
+          fi
+          pacman -U --noconfirm "$package"
+          pacman -Qkk "$PACKAGE_NAME"
+          for path in \
+            /usr/bin/libcrypto.dll \
+            /usr/bin/scp.exe \
+            /usr/bin/sftp.exe \
+            /usr/bin/ssh-add.exe \
+            /usr/bin/ssh-agent.exe \
+            /usr/bin/ssh-keygen.exe \
+            /usr/bin/ssh-keyscan.exe \
+            /usr/bin/ssh-pkcs11-helper.exe \
+            /usr/bin/ssh-sk-helper.exe \
+            /usr/bin/ssh.exe \
+            /usr/lib/ssh/libcrypto.dll \
+            /usr/lib/ssh/sftp-server.exe \
+            /usr/lib/ssh/ssh-pkcs11-helper.exe \
+            /usr/lib/ssh/ssh-sk-helper.exe
+          do
+            test "$(pacman -Qoq "$path")" = "$PACKAGE_NAME"
+          done
+          test ! -e /usr/lib/ssh/ssh-keysign.exe
+          pacman -Ql "$PACKAGE_NAME" >artifacts/pacman-files.txt
+          bsdtar -xOf "$package" .PKGINFO >artifacts/PKGINFO
+          bsdtar -xOf "$package" .BUILDINFO >artifacts/BUILDINFO
+          bsdtar -xOf "$package" .MTREE >artifacts/MTREE.gz
+
+      - name: Validate installed and relocated package
+        shell: pwsh
+        run: |
+          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          & "$env:PACKAGE_DIRECTORY\Test-ClientPackage.ps1" -Root $msysRoot
+
+          $package = Get-Item "artifacts\$env:PACKAGE_NAME-*.pkg.tar.zst"
+          $relocated = Join-Path $env:RUNNER_TEMP 'relocated-openssh'
+          New-Item $relocated -ItemType Directory -Force | Out-Null
+          tar -xf $package.FullName -C $relocated
+          if ($LASTEXITCODE -ne 0) {
+            throw "Package extraction exited $LASTEXITCODE."
+          }
+          & "$env:PACKAGE_DIRECTORY\Test-ClientPackage.ps1" -Root $relocated
+
+          & "$relocated\usr\bin\ssh.exe" -V
+          if ($LASTEXITCODE -ne 0) {
+            throw "Relocated ssh.exe exited $LASTEXITCODE."
+          }
+          $key = Join-Path $env:RUNNER_TEMP 'relocated-ed25519'
+          & "$relocated\usr\bin\ssh-keygen.exe" -q -t ed25519 -N '' -f $key
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$key.pub")) {
+            throw 'Relocated ssh-keygen.exe failed.'
+          }
+
+      - name: Collect machine-readable metadata
+        shell: pwsh
+        run: |
+          Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\manifest.json' artifacts
+          Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\baseline-paths.json' artifacts
+          Copy-Item 'C:\msys64\usr\share\doc\win32-openssh-client\package-files.sha256' artifacts
+
+          $sourceRoot = Join-Path $env:GITHUB_WORKSPACE "$env:PACKAGE_DIRECTORY\src"
+          $sourceRevision = 'b8c08ef9da9450a94a9c5ef717d96a7bd83f3332'
+          $automationRevision = '01cfe49d781acc5f44ca9239a3a2407f5f8f9026'
+          $build = Join-Path $sourceRoot "openssh-portable-$sourceRevision\bin\arm64\Release"
+          $automation = Join-Path $sourceRoot "Win32-OpenSSH-$automationRevision"
+          $support = 'test-support'
+          New-Item $support -ItemType Directory -Force | Out-Null
+          Copy-Item "$build\*" $support -Recurse -Force
+          Copy-Item "$automation\tests\Invoke-OpenSSHClientSmoke.ps1" $support -Force
+
+      - name: Upload ephemeral server test support
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-arm64-win32-openssh-test-support
+          path: test-support
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload fork-local package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-arm64-win32-openssh-client
+          path: artifacts
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Enforce clean-build reproducibility
+        if: always()
+        shell: msys2 {0}
+        run: |
+          test "$(cat artifacts/reproducible.txt)" = yes
+
+  installed-client-smoke:
+    name: Test installed client on fresh ARM64 host
+    needs: build-test-package
+    if: github.repository == 'crutkas/MINGW-packages'
+    runs-on: windows-11-arm
+    timeout-minutes: 90
+
+    steps:
+      - name: Download fork-local package artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: native-arm64-win32-openssh-client
+          path: artifacts
+
+      - name: Download ephemeral server test support
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: native-arm64-win32-openssh-test-support
+          path: test-support
+
+      - name: Install SHA-256-pinned ARM64 MSYS2
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri $env:MSYS2_INSTALLER_URL -OutFile msys2-arm64.exe
+          $actual = (Get-FileHash msys2-arm64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:MSYS2_INSTALLER_SHA256) {
+            throw "MSYS2 installer SHA-256 is $actual; expected $env:MSYS2_INSTALLER_SHA256."
+          }
+          & .\msys2-arm64.exe install --confirm-command --root C:\msys64
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSYS2 installer exited $LASTEXITCODE."
+          }
+
+      - name: Configure fresh native CLANGARM64 environment
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
+        with:
+          msystem: CLANGARM64
+          update: true
+          release: false
+          install: git base-devel
+
+      - name: Install package
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          package=$(printf '%s\n' artifacts/"$PACKAGE_NAME"-*.pkg.tar.zst)
+          if pacman -Q openssh >/dev/null 2>&1; then
+            pacman -Rdd --noconfirm openssh
+          fi
+          pacman -U --noconfirm "$package"
+
+      - name: Rerun client smoke tests from installed payload
+        shell: powershell
+        run: |
+          if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64') {
+            throw 'The smoke workflow is not running on native Windows ARM64.'
+          }
+          $smoke = Join-Path $env:GITHUB_WORKSPACE 'installed-client-smoke'
+          New-Item $smoke -ItemType Directory -Force | Out-Null
+          Copy-Item 'test-support\*' $smoke -Recurse -Force
+
+          $installedBin = 'C:\msys64\usr\bin'
+          foreach ($name in @(
+            'libcrypto.dll', 'scp.exe', 'sftp.exe', 'ssh-add.exe',
+            'ssh-agent.exe', 'ssh-keygen.exe', 'ssh-keyscan.exe',
+            'ssh-pkcs11-helper.exe', 'ssh-sk-helper.exe', 'ssh.exe'
+          )) {
+            Copy-Item (Join-Path $installedBin $name) (Join-Path $smoke $name) -Force
+          }
+          Copy-Item 'C:\msys64\usr\lib\ssh\sftp-server.exe' `
+            (Join-Path $smoke 'sftp-server.exe') -Force
+          & icacls.exe $smoke /grant '*S-1-5-18:(OI)(CI)F' /t /c | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to grant LocalSystem access to '$smoke'."
+          }
+
+          & 'test-support\Invoke-OpenSSHClientSmoke.ps1' `
+            -BuildDirectory $smoke `
+            -GitExecutable 'C:\Program Files\Git\cmd\git.exe'
+
+      - name: Capture service diagnostics on failure
+        if: failure()
+        shell: powershell
+        run: |
+          New-Item smoke-logs -ItemType Directory -Force | Out-Null
+          Get-WinEvent -FilterHashtable @{
+            LogName = 'System'
+            StartTime = (Get-Date).AddMinutes(-15)
+          } -ErrorAction SilentlyContinue |
+            Where-Object Message -Match 'ssh|service' |
+            Format-List TimeCreated, Id, ProviderName, LevelDisplayName, Message |
+            Out-File smoke-logs\system-events.txt
+          Get-WinEvent -FilterHashtable @{
+            LogName = 'Application'
+            StartTime = (Get-Date).AddMinutes(-15)
+          } -ErrorAction SilentlyContinue |
+            Where-Object Message -Match 'ssh' |
+            Format-List TimeCreated, Id, ProviderName, LevelDisplayName, Message |
+            Out-File smoke-logs\application-events.txt
+
+      - name: Upload smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: installed-client-smoke-logs
+          path: smoke-logs
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,164 @@
+# Maintainer: Git for Windows ARM64 contributors
+
+_realname=win32-openssh-client
+pkgbase=mingw-w64-${_realname}
+pkgname="${MINGW_PACKAGE_PREFIX}-${_realname}"
+pkgver=10.0.0.0
+pkgrel=1
+pkgdesc='Native Win32 OpenSSH client payload for Git for Windows (ARM64)'
+arch=('any')
+mingw_arch=('clangarm64')
+url='https://github.com/crutkas/Win32-OpenSSH'
+license=('spdx:BSD-2-Clause AND BSD-3-Clause AND ISC AND MIT')
+makedepends=('git')
+conflicts=('openssh')
+backup=('etc/ssh/ssh_config')
+options=('!strip' '!debug')
+
+_automation_revision=01cfe49d781acc5f44ca9239a3a2407f5f8f9026
+_openssh_revision=b8c08ef9da9450a94a9c5ef717d96a7bd83f3332
+_vcpkg_revision=16fa044f80dd984c24deff5b7d0457e64c85a1e0
+
+# The two third-party inputs are immutable commits pinned and validated by
+# crutkas/Win32-OpenSSH at _automation_revision.
+source=(
+  "Win32-OpenSSH-${_automation_revision}.tar.gz::https://github.com/crutkas/Win32-OpenSSH/archive/${_automation_revision}.tar.gz"
+  "openssh-portable-${_openssh_revision}.tar.gz::https://github.com/PowerShell/openssh-portable/archive/${_openssh_revision}.tar.gz"
+  "vcpkg::git+https://github.com/microsoft/vcpkg.git#commit=${_vcpkg_revision}"
+  '0001-enable-reproducible-linking.patch'
+  '0002-fix-smoke-registry-cleanup.patch'
+  'baseline-paths.json'
+  'README.md'
+)
+sha256sums=(
+  '856b30e382f3487ca9bc758ea9f27e07d6927d2af9b0ef73f01c7dad6064a3f1'
+  '45f316a54fdc0d81a2f8e503ecf78958e0ffc953936a022efc8405b7f14dae0d'
+  'SKIP'
+  '0a7e859d99b19a352b95b2c399f5e2c6e490ac1ae8317d0d74c4e699506d5462'
+  '8d9e8843c1899e40accdb9b6b23aa301548725b3c350acc113e7ad9e70beb273'
+  'd166d522a658e113ab47c317ad756a1d804a3bf644ada71277d405d62114413b'
+  'f0567a718a8746465039a50647bf0ac47524d0a9c01c21d0ca2953336773643a'
+)
+
+_assert_native_arm64() {
+  if [[ ${MSYSTEM:-} != CLANGARM64 || ${CARCH:-} != aarch64 ]]; then
+    printf 'This package must be built natively in CLANGARM64 (CARCH=aarch64).\n' >&2
+    return 1
+  fi
+}
+
+prepare() {
+  _assert_native_arm64
+
+  cd "${srcdir}/Win32-OpenSSH-${_automation_revision}"
+  patch -Np1 -i "${srcdir}/0002-fix-smoke-registry-cleanup.patch"
+
+  cd "${srcdir}/openssh-portable-${_openssh_revision}"
+  # Win32's build helper discovers its repository root through git.
+  git init -q .
+  patch -Np1 -i \
+    "${srcdir}/Win32-OpenSSH-${_automation_revision}/eng/openssh-portable-v10.0.0.0-vcpkg.patch"
+  patch -Np1 -i "${srcdir}/0001-enable-reproducible-linking.patch"
+
+  grep -Fq "\"builtin-baseline\": \"${_vcpkg_revision}\"" \
+    contrib/win32/openssh/vcpkg.json
+}
+
+build() {
+  _assert_native_arm64
+
+  local source_dir="${srcdir}/openssh-portable-${_openssh_revision}"
+  local source_win
+  local destination_win
+  local vcpkg_win
+  source_win=$(cygpath -w "${source_dir}")
+  destination_win=$(cygpath -w "${srcdir}/source-packages")
+  vcpkg_win=$(cygpath -w "${srcdir}/vcpkg")
+
+  VCPKG_DISABLE_METRICS=1 powershell.exe -NoLogo -NoProfile \
+    -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference = 'Stop'; & '${vcpkg_win}\\bootstrap-vcpkg.bat' -disableMetrics; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }; & '${vcpkg_win}\\vcpkg.exe' integrate install; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }"
+
+  VCPKG_ROOT="${vcpkg_win}" VCPKG_DISABLE_METRICS=1 \
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
+      -File "${source_win}\\contrib\\win32\\openssh\\OpenSSH-build.ps1" \
+      -repolocation "${source_win}" \
+      -destination "${destination_win}" \
+      -NativeHostArch arm64 \
+      -Configuration Release \
+      -Verbose
+}
+
+check() {
+  _assert_native_arm64
+
+  local build_win
+  local automation_win
+  build_win=$(cygpath -w \
+    "${srcdir}/openssh-portable-${_openssh_revision}/bin/arm64/Release")
+  automation_win=$(cygpath -w \
+    "${srcdir}/Win32-OpenSSH-${_automation_revision}")
+
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "${automation_win}\\tests\\Invoke-OpenSSHUnitTests.ps1" \
+    -BuildDirectory "${build_win}"
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "${automation_win}\\tests\\Invoke-OpenSSHClientSmoke.ps1" \
+    -BuildDirectory "${build_win}" \
+    -GitExecutable git.exe
+}
+
+package() {
+  _assert_native_arm64
+
+  local automation_dir="${srcdir}/Win32-OpenSSH-${_automation_revision}"
+  local source_dir="${srcdir}/openssh-portable-${_openssh_revision}"
+  local payload_dir="${srcdir}/client-payload"
+  local automation_win
+  local build_win
+  local payload_win
+  automation_win=$(cygpath -w "${automation_dir}")
+  build_win=$(cygpath -w "${source_dir}/bin/arm64/Release")
+  payload_win=$(cygpath -w "${payload_dir}")
+
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "${automation_win}\\scripts\\New-OpenSSHClientPackage.ps1" \
+    -BuildDirectory "${build_win}" \
+    -DestinationDirectory "${payload_win}" \
+    -SourceRevision "${_openssh_revision}" \
+    -SourceRef "v${pkgver}" \
+    -VcpkgBaseline "${_vcpkg_revision}" \
+    -BuildRepository 'crutkas/MINGW-packages'
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "${automation_win}\\tests\\Test-OpenSSHClientPackage.ps1" \
+    -PackageDirectory "${payload_win}"
+
+  cp -a "${payload_dir}/usr" "${pkgdir}/"
+
+  install -Dm644 "${payload_dir}/LICENSE.txt" \
+    "${pkgdir}/usr/share/licenses/${_realname}/LICENSE.txt"
+  install -Dm644 "${payload_dir}/NOTICE.txt" \
+    "${pkgdir}/usr/share/licenses/${_realname}/NOTICE.txt"
+  install -Dm644 \
+    "${source_dir}/contrib/win32/win32compat/ssh_config/ssh_config" \
+    "${pkgdir}/etc/ssh/ssh_config"
+
+  install -Dm644 "${payload_dir}/manifest.json" \
+    "${pkgdir}/usr/share/doc/${_realname}/manifest.json"
+  install -Dm644 "${srcdir}/baseline-paths.json" \
+    "${pkgdir}/usr/share/doc/${_realname}/baseline-paths.json"
+  install -Dm644 "${srcdir}/README.md" \
+    "${pkgdir}/usr/share/doc/${_realname}/README.md"
+  install -Dm644 \
+    "${source_dir}/contrib/win32/win32compat/ssh_config/ssh_config" \
+    "${pkgdir}/usr/share/doc/${_realname}/ssh_config_default"
+
+  (
+    cd "${pkgdir}"
+    find . -type f \
+      ! -path './usr/share/doc/win32-openssh-client/package-files.sha256' \
+      -print0 |
+      LC_ALL=C sort -z |
+      xargs -0 sha256sum
+  ) >"${pkgdir}/usr/share/doc/${_realname}/package-files.sha256"
+}
