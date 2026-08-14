@@ -81,14 +81,20 @@ function Set-SecureAcl {
 }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "packaged-ssh-policy-$PID"
-$profile = Join-Path $tempRoot 'profile'
-$profileSsh = Join-Path $profile '.ssh'
-$include = Join-Path $profileSsh 'included.conf'
+$profileSsh = Join-Path $env:USERPROFILE '.ssh'
+$profileConfig = Join-Path $profileSsh 'config'
+$include = Join-Path $tempRoot 'included policy.conf'
 $explicit = Join-Path $tempRoot 'explicit config.conf'
 $malformed = Join-Path $tempRoot 'malformed.conf'
 $empty = Join-Path $tempRoot 'empty.conf'
-$savedUserProfile = $env:USERPROFILE
-$savedHome = $env:HOME
+$profileSshExisted = Test-Path $profileSsh -PathType Container
+$profileConfigExisted = Test-Path $profileConfig -PathType Leaf
+$savedProfileBytes = if ($profileConfigExisted) {
+    [System.IO.File]::ReadAllBytes($profileConfig)
+}
+$savedProfileAcl = if ($profileConfigExisted) {
+    Get-Acl $profileConfig
+}
 $savedAcl = Get-Acl $globalConfig
 
 try {
@@ -97,11 +103,12 @@ try {
         'Host included-policy'
         '    Port 2204'
     ), [System.Text.UTF8Encoding]::new($false))
-    [System.IO.File]::WriteAllLines((Join-Path $profileSsh 'config'), @(
-        'Include included.conf'
+    [System.IO.File]::WriteAllLines($profileConfig, @(
+        "Include `"$($include.Replace('\', '/'))`""
         'Host user-precedence'
         '    Port 3301'
     ), [System.Text.UTF8Encoding]::new($false))
+    Set-SecureAcl $profileConfig
     [System.IO.File]::WriteAllLines($explicit, @(
         'Host explicit-policy'
         '    Port 4401'
@@ -118,8 +125,6 @@ try {
     )
 
     Set-SecureAcl $globalConfig
-    $env:USERPROFILE = $profile
-    $env:HOME = $profile
 
     $script:ssh = $ssh
     $globalAlgorithms = Get-ResolvedOption `
@@ -154,8 +159,18 @@ try {
     Write-Host 'Passed packaged global policy tests: executable-relative discovery, transformed algorithms, user/-F precedence, Include, and malformed config failure.'
 }
 finally {
-    $env:USERPROFILE = $savedUserProfile
-    $env:HOME = $savedHome
+    if ($profileConfigExisted) {
+        [System.IO.File]::WriteAllBytes($profileConfig, $savedProfileBytes)
+        Set-Acl $profileConfig $savedProfileAcl
+    }
+    else {
+        Remove-Item $profileConfig -Force -ErrorAction SilentlyContinue
+    }
+    if (-not $profileSshExisted -and
+        (Test-Path $profileSsh -PathType Container) -and
+        -not (Get-ChildItem $profileSsh -Force)) {
+        Remove-Item $profileSsh -Force
+    }
     if (-not $KeepSecureAcl) {
         Set-Acl $globalConfig $savedAcl
     }
