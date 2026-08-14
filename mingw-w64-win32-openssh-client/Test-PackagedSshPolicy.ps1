@@ -98,6 +98,7 @@ $savedProfileAcl = if ($profileConfigExisted) {
 $savedAcl = Get-Acl $globalConfig
 
 try {
+    $null = New-Item $tempRoot -ItemType Directory -Force
     $null = New-Item $profileSsh -ItemType Directory -Force
     [System.IO.File]::WriteAllLines($include, @(
         'Host included-policy'
