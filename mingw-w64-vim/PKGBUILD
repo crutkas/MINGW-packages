@@ -1,0 +1,110 @@
+# Maintainer: Git for Windows contributors
+
+_realname=vim
+pkgbase=mingw-w64-${_realname}
+pkgname=("${MINGW_PACKAGE_PREFIX}-${_realname}"
+         "${MINGW_PACKAGE_PREFIX}-${_realname}-runtime")
+_topver=9.2
+_patchlevel=0858
+_versiondir="${_realname}${_topver//./}"
+pkgver=${_topver}.${_patchlevel}
+pkgrel=1
+pkgdesc="Vi Improved, native Win32 console build for Git for Windows (mingw-w64)"
+arch=('any')
+mingw_arch=('clangarm64')
+url="https://www.vim.org"
+msys2_repository_url="https://github.com/vim/vim"
+license=('spdx:Vim')
+makedepends=("${MINGW_PACKAGE_PREFIX}-cc"
+             "${MINGW_PACKAGE_PREFIX}-gettext-runtime"
+             "${MINGW_PACKAGE_PREFIX}-libiconv"
+             "${MINGW_PACKAGE_PREFIX}-make")
+source=("${_realname}-${pkgver}.tar.gz::${msys2_repository_url}/archive/v${pkgver}/${_realname}-${pkgver}.tar.gz"
+        "0001-git-for-windows-native-layout.patch"
+        "git-for-windows.vim"
+        "native-arm64-vim-audit.ps1"
+        "native-arm64-vim-smoke.ps1")
+sha256sums=('d7878b284b5a5ae43831f0a090327472035338768a8fd86deaad57581e842ed3'
+            '2a2bd8397f3d14a4caec95d76398014f883006091f2540efa54b04bfd97dc55b'
+            '60fa92edabf3694809c58470b959213afd50c09428c3018fcc94404ef30f5407'
+            'aacdc3e65afb51185b5bfb86eed64ff302e0e1d468ca654fa381239a3e6eeb5f'
+            '9c03f070b16684df9b68bbfd8015dc434b61125a91ae890268fc09a508acd67a')
+
+prepare() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+  patch -Np1 -i "${srcdir}/0001-git-for-windows-native-layout.patch"
+}
+
+build() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+
+  if [[ ${MSYSTEM} != CLANGARM64 || ${MINGW_CHOST} != aarch64-w64-mingw32 ]]; then
+    error "This lane must build in CLANGARM64 with the aarch64-w64-mingw32 target."
+    return 1
+  fi
+  if [[ $(clang -dumpmachine) != aarch64-w64-windows-gnu ]]; then
+    error "clang is not the native Windows ARM64 compiler."
+    return 1
+  fi
+
+  make -C src -f Make_ming.mak \
+    ARCH=native \
+    CC=clang \
+    CXX=clang++ \
+    CROSS=no \
+    CSCOPE=yes \
+    FEATURES=HUGE \
+    GETTEXT=yes \
+    GUI=no \
+    ICONV=yes \
+    OLE=no \
+    VIMDLL=no \
+    VIMRCLOC= \
+    VIMRUNTIMEDIR= \
+    WINVER=0x0A00 \
+    EXTRA_DEFINES=-DVIM_GIT_FOR_WINDOWS_LAYOUT \
+    vim.exe xxd/xxd.exe
+}
+
+check() {
+  cd "${srcdir}/${_realname}-${pkgver}"
+
+  if [[ $(uname -m) != aarch64 ]]; then
+    error "Refusing to execute ARM64 Vim on a non-ARM64 host."
+    return 1
+  fi
+
+  ./src/vim.exe --version
+  ./src/vim.exe -Nu NONE -i NONE -n -es -c 'echo has("win32") && has("multi_byte")' -c 'qa!'
+  ./src/xxd/xxd.exe -h >/dev/null
+}
+
+package_vim() {
+  pkgdesc="Vi Improved native Win32 console binaries for Git for Windows (mingw-w64)"
+  depends=("${MINGW_PACKAGE_PREFIX}-gettext-runtime"
+           "${MINGW_PACKAGE_PREFIX}-libiconv"
+           "${MINGW_PACKAGE_PREFIX}-${_realname}-runtime=${pkgver}-${pkgrel}")
+
+  cd "${srcdir}/${_realname}-${pkgver}"
+
+  install -Dm755 src/vim.exe "${pkgdir}${MINGW_PREFIX}/bin/vim.exe"
+  for alias in ex rview rvim view vimdiff; do
+    install -Dm755 src/vim.exe "${pkgdir}${MINGW_PREFIX}/bin/${alias}.exe"
+  done
+  install -Dm755 src/xxd/xxd.exe "${pkgdir}${MINGW_PREFIX}/bin/xxd.exe"
+  install -Dm644 LICENSE "${pkgdir}${MINGW_PREFIX}/share/licenses/${_realname}/LICENSE"
+}
+
+package_vim-runtime() {
+  pkgdesc="Runtime files, syntax definitions, and help for Vim (mingw-w64)"
+
+  cd "${srcdir}/${_realname}-${pkgver}"
+
+  install -d "${pkgdir}${MINGW_PREFIX}/share/vim/${_versiondir}"
+  cp -a runtime/. "${pkgdir}${MINGW_PREFIX}/share/vim/${_versiondir}/"
+  install -Dm644 "${srcdir}/git-for-windows.vim" \
+    "${pkgdir}${MINGW_PREFIX}/share/vim/${_versiondir}/git-for-windows.vim"
+  install -Dm644 runtime/doc/vim.1 "${pkgdir}${MINGW_PREFIX}/share/man/man1/vim.1"
+  install -Dm644 runtime/doc/xxd.1 "${pkgdir}${MINGW_PREFIX}/share/man/man1/xxd.1"
+  install -Dm644 LICENSE "${pkgdir}${MINGW_PREFIX}/share/licenses/${_realname}-runtime/LICENSE"
+}

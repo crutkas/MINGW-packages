@@ -1,0 +1,64 @@
+diff --git a/src/misc1.c b/src/misc1.c
+index c09ae8127..cf5393040 100644
+--- a/src/misc1.c
++++ b/src/misc1.c
+@@ -1786,6 +1786,14 @@ vim_version_dir(char_u *vimdir)
+ 		return p.string;
+ 	}
+     }
++#if defined(MSWIN) && defined(VIM_GIT_FOR_WINDOWS_LAYOUT)
++    vim_free(p.string);
++    concat_fnames(vimdir, vimdir_len,
++	    (char_u *)"../share/vim/" VIM_VERSION_NODOT,
++	    STRLEN_LITERAL("../share/vim/" VIM_VERSION_NODOT), TRUE, &p);
++    if (p.string != NULL && mch_isdir(p.string))
++	return p.string;
++#endif
+     vim_free(p.string);
+     return NULL;
+ }
+diff --git a/src/os_dos.h b/src/os_dos.h
+index 72a876755..446b37367 100644
+--- a/src/os_dos.h
++++ b/src/os_dos.h
+@@ -13,6 +13,17 @@
+  * Some of these may have been defined in the makefile or feature.h.
+  */
+ 
++#ifdef VIM_GIT_FOR_WINDOWS_LAYOUT
++# define SYS_VIMRC_FILE		"$VIMRUNTIME\\git-for-windows.vim"
++# define USR_VIMRC_FILE		"$HOME\\.vimrc"
++# define USR_VIMRC_FILE2	"$HOME\\_vimrc"
++# define USR_VIMRC_FILE3	"$HOME\\vimfiles\\vimrc"
++# define USR_EXRC_FILE		"$HOME\\.exrc"
++# define USR_EXRC_FILE2		"$HOME\\_exrc"
++# define VIMINFO_FILE		"$HOME\\.viminfo"
++# define VIMINFO_FILE2		"$HOME\\_viminfo"
++#endif
++
+ #ifndef SYS_VIMRC_FILE
+ # define SYS_VIMRC_FILE		"$VIM\\vimrc"
+ #endif
+@@ -82,7 +93,11 @@
+ #endif
+ 
+ #ifndef DFLT_VDIR
++# ifdef VIM_GIT_FOR_WINDOWS_LAYOUT
++#  define DFLT_VDIR	"$HOME/.vim/view"	// default for 'viewdir'
++# else
+ # define DFLT_VDIR	"$HOME/vimfiles/view"	// default for 'viewdir'
++# endif
+ #endif
+ 
+ #ifndef DFLT_DIR
+@@ -91,6 +106,10 @@
+ 
+ #define DFLT_ERRORFILE		"errors.err"
++#ifdef VIM_GIT_FOR_WINDOWS_LAYOUT
++# define DFLT_RUNTIMEPATH	"$HOME/.vim,$VIM/vimfiles,$VIMRUNTIME,$HOME/.vim/after,$VIM/vimfiles/after"
++#else
+ #define DFLT_RUNTIMEPATH	"$HOME/vimfiles,$VIM/vimfiles,$VIMRUNTIME,$HOME/vimfiles/after,$VIM/vimfiles/after"
++#endif
+ #define CLEAN_RUNTIMEPATH	"$VIM/vimfiles,$VIMRUNTIME,$VIM/vimfiles/after"
+ 
+ #define CASE_INSENSITIVE_FILENAME   // ignore case when comparing file names
