@@ -279,7 +279,9 @@ while ($queue.Count -gt 0) {
     }
 }
 
-foreach ($archive in (Get-ChildItem $resolvedRoot -Recurse -File -Include *.a,*.lib)) {
+foreach ($archive in (Get-ChildItem $resolvedRoot -Recurse -File | Where-Object {
+    $_.Extension -eq '.a' -or $_.Extension -ceq '.lib'
+})) {
     $headers = & $readObj --file-headers $archive.FullName 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect archive members in $($archive.FullName)`n$headers"
