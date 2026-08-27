@@ -272,7 +272,7 @@ if ($discoveredRuntime -ne (Resolve-Path $runtime).Path -or
 
 "let g:native_arm64_vimrc = 'loaded'" | Set-Content -Encoding ascii (Join-Path $testHome '.vimrc')
 $vimrcVerbose = Join-Path $ReportDirectory 'vimrc.verbose.txt'
-Invoke-Checked $vim @('-i', 'NONE', '-n', '-e', "-V9$vimrcVerbose",
+Invoke-Checked $vim @('-i', 'NONE', '-n', "-V9$vimrcVerbose",
     '-c', 'call writefile([get(g:, "native_arm64_vimrc", "missing")], "vimrc.txt")',
     '-c', 'qa!') 'vimrc'
 if ((Get-Content (Join-Path $work 'vimrc.txt') -Raw).Trim() -ne 'loaded') {
@@ -298,7 +298,7 @@ if ([Text.Encoding]::ASCII.GetString($crlfBytes) -ne "one`r`ntwo`r`n") {
     throw 'CRLF write validation failed'
 }
 
-Invoke-Checked $vim @('-i', 'NONE', '-n', '-e',
+Invoke-Checked $vim @('-i', 'NONE', '-n',
     '-c', 'silent !printf subprocess-ok > subprocess.txt',
     '-c', 'if v:shell_error | cquit 91 | endif', '-c', 'qa!') 'subprocess'
 if ((Get-Content (Join-Path $work 'subprocess.txt') -Raw).Trim() -ne 'subprocess-ok') {
