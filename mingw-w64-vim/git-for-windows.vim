@@ -8,7 +8,7 @@ endif
 if &shell =~? '\v(^|[/\\])(ba|z|da|k)?sh(\.exe)?$'
   set shellcmdflag=-c
   set shellquote=
-  set shellxquote=
+  set shellxquote=\"
   set shellslash
   set shellredir=>%s\ 2>&1
   set shellpipe=2>&1\|\ tee

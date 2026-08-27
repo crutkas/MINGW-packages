@@ -26,7 +26,7 @@ source=("${_realname}-${pkgver}.tar.gz::${msys2_repository_url}/archive/v${pkgve
         "native-arm64-vim-smoke.ps1")
 sha256sums=('d7878b284b5a5ae43831f0a090327472035338768a8fd86deaad57581e842ed3'
             '2a2bd8397f3d14a4caec95d76398014f883006091f2540efa54b04bfd97dc55b'
-            '60fa92edabf3694809c58470b959213afd50c09428c3018fcc94404ef30f5407'
+            '3c16fd3d7850ca365444142fc1207964b11632b762c35f2490ebbbe9fb521040'
             '578246b28577d3f42aaaf549dad9eb03807ea93cb7433c47fdcc67277bc44468'
             '3c1f82e8d24b2998aaf537d9a32913e72e27ca83de4198360361305a012b8e48')
 
