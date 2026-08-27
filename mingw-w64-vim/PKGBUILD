@@ -108,3 +108,11 @@ package_vim-runtime() {
   install -Dm644 runtime/doc/xxd.1 "${pkgdir}${MINGW_PREFIX}/share/man/man1/xxd.1"
   install -Dm644 LICENSE "${pkgdir}${MINGW_PREFIX}/share/licenses/${_realname}-runtime/LICENSE"
 }
+
+# template start; name=mingw-w64-splitpkg-wrappers; version=1.0;
+for _name in "${pkgname[@]}"; do
+  _short="package_${_name#${MINGW_PACKAGE_PREFIX}-}"
+  _func="$(declare -f "${_short}")"
+  eval "${_func/#${_short}/package_${_name}}"
+done
+# template end;
