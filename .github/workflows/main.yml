@@ -70,7 +70,7 @@ jobs:
             git python base-devel
             ${{ matrix.msystem == 'CLANGARM64' && 'mingw-w64-clang-aarch64-llvm' || '' }}
           update: true
-          release: ${{ runner.arch != 'ARM64' }}
+          release: true
           location: 'D:\M'
 
       - name: Add staging repo
