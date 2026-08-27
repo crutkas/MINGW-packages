@@ -25,8 +25,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Get CPU Name
+        id: facts
         run : |
           Get-CIMInstance -Class Win32_Processor | Select-Object -Property Name
+          $buildDrive = Split-Path $env:GITHUB_WORKSPACE -Qualifier
+          "drive=$buildDrive" >> $env:GITHUB_OUTPUT
 
       - name: Setup JIT minidump
         if: ${{ matrix.msystem != 'CLANGARM64' }}
@@ -71,7 +74,7 @@ jobs:
             ${{ matrix.msystem == 'CLANGARM64' && 'mingw-w64-clang-aarch64-llvm' || '' }}
           update: true
           release: true
-          location: 'D:\M'
+          location: '${{ steps.facts.outputs.drive }}\M'
 
       - name: Add staging repo
         shell: msys2 {0}
