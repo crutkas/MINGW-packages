@@ -111,10 +111,13 @@ jobs:
           $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
           $dependencyArchives = @(
             Get-ChildItem "$msysRoot\var\cache\pacman\pkg\mingw-w64-clang-aarch64-libiconv-*.pkg.tar.*" -ErrorAction SilentlyContinue |
+              Where-Object Name -NotLike '*.sig' |
               Sort-Object LastWriteTime -Descending | Select-Object -First 1
             Get-ChildItem "$msysRoot\var\cache\pacman\pkg\mingw-w64-clang-aarch64-gettext-runtime-*.pkg.tar.*" -ErrorAction SilentlyContinue |
+              Where-Object Name -NotLike '*.sig' |
               Sort-Object LastWriteTime -Descending | Select-Object -First 1
             Get-ChildItem "$msysRoot\var\cache\pacman\pkg\mingw-w64-clang-aarch64-gcc-libs-*.pkg.tar.*" -ErrorAction SilentlyContinue |
+              Where-Object Name -NotLike '*.sig' |
               Sort-Object LastWriteTime -Descending | Select-Object -First 1
           ) | ForEach-Object FullName
           C:\_\mingw-w64-vim\native-arm64-vim-audit.ps1 `
