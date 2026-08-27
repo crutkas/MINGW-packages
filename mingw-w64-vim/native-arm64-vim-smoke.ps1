@@ -259,24 +259,10 @@ foreach ($feature in @('-lua', '-perl', '-python3', '-ruby')) {
     }
 }
 
-$probe = Join-Path $work 'probe.vim'
-@"
-set encoding=utf-8
-syntax on
-call writefile([
-\ `$VIMRUNTIME,
-\ globpath(`$VIMRUNTIME, 'syntax/c.vim'),
-\ &runtimepath,
-\ &shell,
-\ &shellcmdflag,
-\ &shellslash,
-\ string(has('win32')),
-\ string(has('multi_byte')),
-\ string(has('syntax'))
-\ ], 'probe.txt')
-qa!
-"@ | Set-Content -Encoding utf8 $probe
-Invoke-Checked $vim @('-n', '-es', '-S', $probe) 'runtime'
+$runtimeVerbose = Join-Path $ReportDirectory 'runtime.verbose.txt'
+$runtimeProbe = 'call writefile([$VIMRUNTIME, globpath($VIMRUNTIME, "syntax/c.vim"), &runtimepath, &shell, &shellcmdflag, &shellslash, string(has("win32")), string(has("multi_byte")), string(exists("g:syntax_on"))], "probe.txt")'
+Invoke-Checked $vim @('-Nu', 'NONE', '-i', 'NONE', '-n', '-es', "-V9$runtimeVerbose",
+    '-c', 'set encoding=utf-8', '-c', 'syntax on', '-c', $runtimeProbe, '-c', 'qa!') 'runtime'
 $probeResult = Get-Content (Join-Path $work 'probe.txt')
 $discoveredRuntime = (Resolve-Path $probeResult[0]).Path
 if ($discoveredRuntime -ne (Resolve-Path $runtime).Path -or
@@ -285,10 +271,10 @@ if ($discoveredRuntime -ne (Resolve-Path $runtime).Path -or
 }
 
 "let g:native_arm64_vimrc = 'loaded'" | Set-Content -Encoding ascii (Join-Path $testHome '.vimrc')
-$vimrcProbe = Join-Path $work 'vimrc-probe.vim'
-"call writefile([get(g:, 'native_arm64_vimrc', 'missing')], 'vimrc.txt')`nqa!" |
-    Set-Content -Encoding ascii $vimrcProbe
-Invoke-Checked $vim @('-n', '-es', '-S', $vimrcProbe) 'vimrc'
+$vimrcVerbose = Join-Path $ReportDirectory 'vimrc.verbose.txt'
+Invoke-Checked $vim @('-i', 'NONE', '-n', '-es', "-V9$vimrcVerbose",
+    '-c', 'call writefile([get(g:, "native_arm64_vimrc", "missing")], "vimrc.txt")',
+    '-c', 'qa!') 'vimrc'
 if ((Get-Content (Join-Path $work 'vimrc.txt') -Raw).Trim() -ne 'loaded') {
     throw 'The Git for Windows ~/.vimrc lookup was not preserved'
 }
@@ -312,10 +298,9 @@ if ([Text.Encoding]::ASCII.GetString($crlfBytes) -ne "one`r`ntwo`r`n") {
     throw 'CRLF write validation failed'
 }
 
-$shellProbe = Join-Path $work 'shell-probe.vim'
-"silent !printf subprocess-ok > subprocess.txt`nif v:shell_error | cquit 91 | endif`nqa!" |
-    Set-Content -Encoding ascii $shellProbe
-Invoke-Checked $vim @('-n', '-es', '-S', $shellProbe) 'subprocess'
+Invoke-Checked $vim @('-i', 'NONE', '-n', '-es',
+    '-c', 'silent !printf subprocess-ok > subprocess.txt',
+    '-c', 'if v:shell_error | cquit 91 | endif', '-c', 'qa!') 'subprocess'
 if ((Get-Content (Join-Path $work 'subprocess.txt') -Raw).Trim() -ne 'subprocess-ok') {
     throw 'POSIX subprocess/shell behavior failed'
 }
