@@ -42,10 +42,135 @@ $env:SHELL = $shell
 Remove-Item Env:VIM -ErrorAction SilentlyContinue
 Remove-Item Env:VIMRUNTIME -ErrorAction SilentlyContinue
 
+if (-not ('NativeSmokeProcessJob' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public sealed class NativeSmokeProcessJob : IDisposable
+{
+    private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+    private IntPtr handle;
+
+    public NativeSmokeProcessJob()
+    {
+        handle = CreateJobObject(IntPtr.Zero, null);
+        if (handle == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+
+        var limits = new JobObjectExtendedLimitInformation();
+        limits.BasicLimitInformation.LimitFlags = JobObjectLimitKillOnJobClose;
+        int size = Marshal.SizeOf(limits);
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(limits, buffer, false);
+            if (!SetInformationJobObject(handle, 9, buffer, (uint)size))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        catch
+        {
+            CloseHandle(handle);
+            handle = IntPtr.Zero;
+            throw;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    public void Add(Process process)
+    {
+        if (!AssignProcessToJobObject(handle, process.Handle))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    public void Terminate()
+    {
+        if (!TerminateJobObject(handle, 1))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    public void Dispose()
+    {
+        if (handle != IntPtr.Zero)
+        {
+            CloseHandle(handle);
+            handle = IntPtr.Zero;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectBasicLimitInformation
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectExtendedLimitInformation
+    {
+        public JobObjectBasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateJobObject(IntPtr securityAttributes, string name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetInformationJobObject(
+        IntPtr job, int informationClass, IntPtr information, uint informationLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+'@
+}
+
 function Invoke-Logged {
-    param([string] $File, [string[]] $Arguments, [string] $Log, [string] $WorkingDirectory = $work)
+    param(
+        [string] $File,
+        [string[]] $Arguments,
+        [string] $Log,
+        [string] $WorkingDirectory = $work,
+        [int] $TimeoutSeconds = 120
+    )
     $stdout = Join-Path $ReportDirectory "$Log.stdout.txt"
     $stderr = Join-Path $ReportDirectory "$Log.stderr.txt"
+    $progress = Join-Path $ReportDirectory 'smoke-progress.txt'
+    "$(Get-Date -AsUTC -Format o) START $Log ($File)" |
+        Add-Content -Encoding utf8 $progress
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $File
     $info.WorkingDirectory = $WorkingDirectory
@@ -55,13 +180,59 @@ function Invoke-Logged {
     foreach ($argument in $Arguments) {
         $info.ArgumentList.Add($argument)
     }
-    $process = [Diagnostics.Process]::Start($info)
-    $standardOutput = $process.StandardOutput.ReadToEndAsync()
-    $standardError = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
-    $standardOutput.Result | Set-Content -Encoding utf8 $stdout
-    $standardError.Result | Set-Content -Encoding utf8 $stderr
-    return $process.ExitCode
+    $job = [NativeSmokeProcessJob]::new()
+    $process = $null
+    try {
+        $process = [Diagnostics.Process]::Start($info)
+        $job.Add($process)
+        $standardOutput = $process.StandardOutput.ReadToEndAsync()
+        $standardError = $process.StandardError.ReadToEndAsync()
+        $exited = $process.WaitForExit($TimeoutSeconds * 1000)
+        if (-not $exited) {
+            $job.Terminate()
+            $process.WaitForExit(10000) | Out-Null
+        }
+    } catch {
+        if ($null -ne $process -and -not $process.HasExited) {
+            $process.Kill($true)
+        }
+        throw
+    } finally {
+        $job.Dispose()
+    }
+
+    $outputCompleted = [Threading.Tasks.Task]::WaitAny(
+        [Threading.Tasks.Task[]] @($standardOutput, [Threading.Tasks.Task]::Delay(10000))) -eq 0
+    $errorCompleted = [Threading.Tasks.Task]::WaitAny(
+        [Threading.Tasks.Task[]] @($standardError, [Threading.Tasks.Task]::Delay(10000))) -eq 0
+    if ($outputCompleted) {
+        $standardOutput.GetAwaiter().GetResult() | Set-Content -Encoding utf8 $stdout
+    } else {
+        '<stdout did not close after the process exited>' | Set-Content -Encoding utf8 $stdout
+        $process.StandardOutput.Dispose()
+    }
+    if ($errorCompleted) {
+        $standardError.GetAwaiter().GetResult() | Set-Content -Encoding utf8 $stderr
+    } else {
+        '<stderr did not close after the process exited>' | Set-Content -Encoding utf8 $stderr
+        $process.StandardError.Dispose()
+    }
+
+    if (-not $exited) {
+        "$(Get-Date -AsUTC -Format o) TIMEOUT $Log after ${TimeoutSeconds}s" |
+            Add-Content -Encoding utf8 $progress
+        throw "$File timed out after $TimeoutSeconds seconds; see $Log.stdout.txt and $Log.stderr.txt"
+    }
+    if (-not $outputCompleted -or -not $errorCompleted) {
+        "$(Get-Date -AsUTC -Format o) STREAM-TIMEOUT $Log" |
+            Add-Content -Encoding utf8 $progress
+        throw "$File left a redirected output stream open; see $Log.stdout.txt and $Log.stderr.txt"
+    }
+
+    $exitCode = $process.ExitCode
+    "$(Get-Date -AsUTC -Format o) END $Log exit=$exitCode" |
+        Add-Content -Encoding utf8 $progress
+    return $exitCode
 }
 
 function Invoke-Checked {
@@ -151,10 +322,13 @@ if ((Get-Content (Join-Path $work 'subprocess.txt') -Raw).Trim() -ne 'subprocess
 
 $convertedFile = Join-Path $work 'msys-path-conversion.txt'
 'before' | Set-Content -Encoding ascii $convertedFile
-$vimUnix = (& $cygpath -u $vim).Trim()
-$fileUnix = (& $cygpath -u $convertedFile).Trim()
+Invoke-Checked $cygpath @('-u', $vim) 'cygpath-vim'
+$vimUnix = (Get-Content (Join-Path $ReportDirectory 'cygpath-vim.stdout.txt') -Raw).Trim()
+Invoke-Checked $cygpath @('-u', $convertedFile) 'cygpath-file'
+$fileUnix = (Get-Content (Join-Path $ReportDirectory 'cygpath-file.stdout.txt') -Raw).Trim()
 $launcher = Join-Path $work 'msys-launch.sh'
-$launcherUnix = (& $cygpath -u $launcher).Trim()
+Invoke-Checked $cygpath @('-u', $launcher) 'cygpath-launcher'
+$launcherUnix = (Get-Content (Join-Path $ReportDirectory 'cygpath-launcher.stdout.txt') -Raw).Trim()
 [IO.File]::WriteAllText(
     $launcher,
     "#!/bin/sh`n`"$vimUnix`" -Nu NONE -i NONE -n -es `"$fileUnix`" -c `"call append(line('$'), 'converted')`" -c 'wq!'`n",

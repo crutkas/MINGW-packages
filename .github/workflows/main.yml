@@ -130,6 +130,7 @@ jobs:
 
       - name: Smoke native ARM64 Vim candidate
         if: ${{ matrix.msystem == 'CLANGARM64' && hashFiles('temp/mingw-w64-vim/PKGBUILD') != '' }}
+        timeout-minutes: 15
         shell: pwsh
         run: |
           C:\_\mingw-w64-vim\native-arm64-vim-smoke.ps1 `
