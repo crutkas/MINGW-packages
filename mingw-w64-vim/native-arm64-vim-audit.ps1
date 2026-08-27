@@ -183,15 +183,28 @@ $dependencyExtractRoot = Join-Path $resolvedRoot 'dependency-prefix'
 if ($DependencyArchives.Count -gt 0) {
     New-Item $dependencyExtractRoot -ItemType Directory -Force | Out-Null
     New-Item (Join-Path $ReportDirectory 'dependency-archives') -ItemType Directory -Force | Out-Null
+    $dependencyArchiveRecords = [Collections.Generic.List[object]]::new()
     foreach ($dependencyArchive in $DependencyArchives) {
         $resolvedDependencyArchive = (Resolve-Path $dependencyArchive).Path
         $dependencyName = Split-Path $resolvedDependencyArchive -Leaf
         Copy-Item $resolvedDependencyArchive (Join-Path $ReportDirectory "dependency-archives\$dependencyName")
+        $dependencyMembers = @(& tar.exe -tf $resolvedDependencyArchive 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not list dependency archive $resolvedDependencyArchive`n$dependencyMembers"
+        }
+        $dependencyArchiveRecords.Add([pscustomobject]@{
+            Filename = $dependencyName
+            Size = (Get-Item $resolvedDependencyArchive).Length
+            SHA256 = (Get-FileHash $resolvedDependencyArchive -Algorithm SHA256).Hash
+            Members = $dependencyMembers.Count
+        })
         & tar.exe -xf $resolvedDependencyArchive -C $dependencyExtractRoot
         if ($LASTEXITCODE -ne 0) {
             throw "Could not extract dependency archive $resolvedDependencyArchive"
         }
     }
+    $dependencyArchiveRecords | ConvertTo-Json |
+        Set-Content -Encoding utf8 (Join-Path $ReportDirectory 'dependency-archives.json')
     $DependencyPrefix = Join-Path $dependencyExtractRoot 'clangarm64'
 }
 if (-not $DependencyPrefix) {
@@ -213,7 +226,7 @@ if (Test-Path $dependencyBin) {
         $dependencyFiles[$_.Name.ToLowerInvariant()] = $_.FullName
     }
 }
-if ($FallbackDependencyPrefix) {
+if ($FallbackDependencyPrefix -and $DependencyArchives.Count -eq 0) {
     $fallbackBin = Join-Path $FallbackDependencyPrefix 'bin'
     if (Test-Path $fallbackBin) {
         Get-ChildItem $fallbackBin -File | ForEach-Object {

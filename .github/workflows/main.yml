@@ -116,7 +116,7 @@ jobs:
             Get-ChildItem "$msysRoot\var\cache\pacman\pkg\mingw-w64-clang-aarch64-gettext-runtime-*.pkg.tar.*" -ErrorAction SilentlyContinue |
               Where-Object Name -NotLike '*.sig' |
               Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            Get-ChildItem "$msysRoot\var\cache\pacman\pkg\mingw-w64-clang-aarch64-gcc-libs-*.pkg.tar.*" -ErrorAction SilentlyContinue |
+            Get-ChildItem "$msysRoot\var\cache\pacman\pkg\mingw-w64-clang-aarch64-libc++-*.pkg.tar.*" -ErrorAction SilentlyContinue |
               Where-Object Name -NotLike '*.sig' |
               Sort-Object LastWriteTime -Descending | Select-Object -First 1
           ) | ForEach-Object FullName
