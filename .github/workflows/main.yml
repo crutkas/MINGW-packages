@@ -19,14 +19,17 @@ jobs:
           { msystem: CLANG64, runner: windows-2025 },
           { msystem: MINGW64, runner: windows-2025 },
           { msystem: MINGW32, runner: windows-2025 },
-          # { msystem: CLANGARM64, runner: ['Windows', 'ARM64', 'CI'] }
+          { msystem: CLANGARM64, runner: windows-11-arm }
         ]
     name: ${{ matrix.msystem }}
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Get CPU Name
+        id: facts
         run : |
           Get-CIMInstance -Class Win32_Processor | Select-Object -Property Name
+          $buildDrive = Split-Path $env:GITHUB_WORKSPACE -Qualifier
+          "drive=$buildDrive" >> $env:GITHUB_OUTPUT
 
       - name: Setup JIT minidump
         if: ${{ matrix.msystem != 'CLANGARM64' }}
@@ -57,17 +60,21 @@ jobs:
 
       # to match the autobuild environment
       - uses: actions/setup-python@v5
+        if: ${{ matrix.msystem != 'CLANGARM64' }}
         with:
           python-version: '3.12'
           architecture: 'x64'
 
       - uses: msys2/setup-msys2@v2
+        id: msys2
         with:
           msystem: ${{ matrix.msystem }}
-          install: git python base-devel
+          install: >-
+            git python base-devel
+            ${{ matrix.msystem == 'CLANGARM64' && 'mingw-w64-clang-aarch64-llvm' || '' }}
           update: true
-          release: ${{ runner.arch != 'ARM64' }}
-          location: 'D:\M'
+          release: true
+          location: '${{ steps.facts.outputs.drive }}\M'
 
       - name: Add staging repo
         shell: msys2 {0}
@@ -93,6 +100,58 @@ jobs:
           unset VCPKG_ROOT
           MINGW_ARCH=${{ matrix.msystem }} ./.ci/ci-build.sh
 
+      - name: Fetch native ARM64 Vim dependency closure
+        if: ${{ matrix.msystem == 'CLANGARM64' && hashFiles('temp/mingw-w64-vim/PKGBUILD') != '' }}
+        shell: msys2 {0}
+        run: |
+          mkdir -p /c/_/native-arm64-vim-dependency-archives
+          sed '/^\[ci\]$/,/^$/d' /etc/pacman.conf \
+            > /c/_/native-arm64-vim-dependency-archives/pacman.conf
+          pacman --config /c/_/native-arm64-vim-dependency-archives/pacman.conf \
+            --noconfirm -Sw --cachedir /c/_/native-arm64-vim-dependency-archives \
+            mingw-w64-clang-aarch64-libiconv \
+            mingw-w64-clang-aarch64-gettext-runtime \
+            mingw-w64-clang-aarch64-libc++
+
+      - name: Audit native ARM64 Vim candidate
+        if: ${{ matrix.msystem == 'CLANGARM64' && hashFiles('temp/mingw-w64-vim/PKGBUILD') != '' }}
+        shell: pwsh
+        run: |
+          $archives = Get-ChildItem C:\_\artifacts\*vim*.pkg.tar.* | ForEach-Object FullName
+          if ($archives.Count -ne 2) {
+            throw "Expected two Vim package splits, found $($archives.Count)"
+          }
+          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          $dependencyCache = 'C:\_\native-arm64-vim-dependency-archives'
+          $dependencyArchives = @(
+            Get-ChildItem "$dependencyCache\mingw-w64-clang-aarch64-libiconv-*.pkg.tar.*" -ErrorAction SilentlyContinue |
+              Where-Object Name -NotLike '*.sig' |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            Get-ChildItem "$dependencyCache\mingw-w64-clang-aarch64-gettext-runtime-*.pkg.tar.*" -ErrorAction SilentlyContinue |
+              Where-Object Name -NotLike '*.sig' |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            Get-ChildItem "$dependencyCache\mingw-w64-clang-aarch64-libc++-*.pkg.tar.*" -ErrorAction SilentlyContinue |
+              Where-Object Name -NotLike '*.sig' |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          ) | ForEach-Object FullName
+          C:\_\mingw-w64-vim\native-arm64-vim-audit.ps1 `
+            -Archives $archives `
+            -DependencyArchives $dependencyArchives `
+            -FallbackDependencyPrefix "$msysRoot\clangarm64" `
+            -Root C:\_\native-arm64-vim-root `
+            -MsysRoot $msysRoot `
+            -ReportDirectory C:\_\native-arm64-vim-evidence
+
+      - name: Smoke native ARM64 Vim candidate
+        if: ${{ matrix.msystem == 'CLANGARM64' && hashFiles('temp/mingw-w64-vim/PKGBUILD') != '' }}
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          C:\_\mingw-w64-vim\native-arm64-vim-smoke.ps1 `
+            -Root C:\_\native-arm64-vim-root `
+            -MsysRoot '${{ steps.msys2.outputs.msys2-location }}' `
+            -ReportDirectory C:\_\native-arm64-vim-evidence
+
       - name: "Upload binaries"
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -107,6 +166,14 @@ jobs:
         with:
           name: ${{ matrix.msystem }}-dumps
           path: ${{ runner.temp }}/_dumps/*.dmp
+          if-no-files-found: ignore
+
+      - name: "Upload native ARM64 Vim evidence"
+        if: ${{ !cancelled() && matrix.msystem == 'CLANGARM64' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-arm64-vim-evidence
+          path: C:/_/native-arm64-vim-evidence
           if-no-files-found: ignore
 
       - name: "Clean up runner"
