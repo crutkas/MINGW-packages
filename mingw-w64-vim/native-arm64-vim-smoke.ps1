@@ -22,13 +22,13 @@ $vim = Join-Path $bin 'vim.exe'
 $xxd = Join-Path $bin 'xxd.exe'
 $runtime = Join-Path $root 'clangarm64\share\vim\vim92'
 $work = Join-Path $root 'native-smoke'
-$home = Join-Path $work 'home'
+$testHome = Join-Path $work 'home'
 $temp = Join-Path $work 'tmp'
 New-Item $ReportDirectory -ItemType Directory -Force | Out-Null
-New-Item $home, $temp -ItemType Directory -Force | Out-Null
+New-Item $testHome, $temp -ItemType Directory -Force | Out-Null
 
-$env:HOME = $home
-$env:USERPROFILE = $home
+$env:HOME = $testHome
+$env:USERPROFILE = $testHome
 $env:TEMP = $temp
 $env:TMP = $temp
 $env:PATH = "$bin;$(Join-Path $root 'deps');$env:PATH"
@@ -113,7 +113,7 @@ if ($discoveredRuntime -ne (Resolve-Path $runtime).Path -or
     throw "Runtime/syntax discovery failed: $($probeResult -join '; ')"
 }
 
-"let g:native_arm64_vimrc = 'loaded'" | Set-Content -Encoding ascii (Join-Path $home '.vimrc')
+"let g:native_arm64_vimrc = 'loaded'" | Set-Content -Encoding ascii (Join-Path $testHome '.vimrc')
 $vimrcProbe = Join-Path $work 'vimrc-probe.vim'
 "call writefile([get(g:, 'native_arm64_vimrc', 'missing')], 'vimrc.txt')`nqa!" |
     Set-Content -Encoding ascii $vimrcProbe
