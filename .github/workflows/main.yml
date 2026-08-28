@@ -1,160 +1,76 @@
-name: main
-
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: true
-
-on:
-  push:
-  pull_request:
-
-jobs:
-  build:
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/master'}}
-    strategy:
-      fail-fast: false
-      matrix:
-        include: [
-          { msystem: UCRT64, runner: windows-2025 },
-          { msystem: CLANG64, runner: windows-2025 },
-          { msystem: MINGW64, runner: windows-2025 },
-          { msystem: MINGW32, runner: windows-2025 },
-          # { msystem: CLANGARM64, runner: ['Windows', 'ARM64', 'CI'] }
-        ]
-    name: ${{ matrix.msystem }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Get CPU Name
-        run : |
-          Get-CIMInstance -Class Win32_Processor | Select-Object -Property Name
-
-      - name: Setup JIT minidump
-        if: ${{ matrix.msystem != 'CLANGARM64' }}
-        run: |
-          Set-Location '${{ runner.temp }}'
-          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile Procdump.zip
-          Expand-Archive Procdump.zip -DestinationPath .
-          New-Item -Path '_dumps' -ItemType Directory
-          .\procdump64.exe -accepteula -ma -i "${{ runner.temp }}/_dumps"
-          .\procdump.exe -accepteula -ma -i "${{ runner.temp }}/_dumps"
-
-      - name: Configure Pagefile
-        if: ${{ matrix.msystem != 'CLANGARM64' }}
-        # https://github.com/al-cheb/configure-pagefile-action/issues/16
-        continue-on-error: true
-        uses: al-cheb/configure-pagefile-action@a3b6ebd6b634da88790d9c58d4b37a7f4a7b8708 # v1.4
-        with:
-          minimum-size: 4GB
-          maximum-size: 16GB
-          disk-root: "C:"
-
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: temp
-          fetch-depth: 0
-          filter: blob:none
-          persist-credentials: false
-
-      # to match the autobuild environment
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-          architecture: 'x64'
-
-      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
-        with:
-          msystem: ${{ matrix.msystem }}
-          install: git python base-devel
-          update: true
-          release: ${{ runner.arch != 'ARM64' }}
-          location: 'D:\M'
-
-      - name: Add staging repo
-        shell: msys2 {0}
-        run: |
-          cp /etc/pacman.conf /etc/pacman.conf.bak
-          grep -qFx '[staging]' /etc/pacman.conf || sed -i '/^# \[staging\]/,/^$/ s|^# ||g' /etc/pacman.conf
-
-      - name: Update using staging
-        run: |
-          msys2 -c 'pacman --noconfirm -Suuy'
-          msys2 -c 'pacman --noconfirm -Suu'
-
-      - name: Move Checkout
-        run: |
-          If (Test-Path "C:\_") { rm -r -fo "C:\_" }
-          Copy-Item -Path ".\temp" -Destination "C:\_" -Recurse
-
-      - name: CI-Build
-        shell: msys2 {0}
-        id: build
-        run: |
-          cd /C/_
-          unset VCPKG_ROOT
-          MINGW_ARCH=${{ matrix.msystem }} ./.ci/ci-build.sh
-
-      - name: "Upload binaries"
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ${{ matrix.msystem }}-packages
-          path: C:/_/artifacts/*.pkg.tar.*
-          if-no-files-found: ignore
-
-      - name: "Upload dumps"
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ${{ matrix.msystem }}-dumps
-          path: ${{ runner.temp }}/_dumps/*.dmp
-          if-no-files-found: ignore
-
-      - name: "Clean up runner"
-        if: ${{ always() }}
-        continue-on-error: true
-        run: |
-          If (Test-Path "C:\_") { rm -r -fo "C:\_" }
-          msys2 -c 'mv -f /etc/pacman.conf.bak /etc/pacman.conf'
-          msys2 -c 'pacman --noconfirm -Suuy'
-          msys2 -c 'pacman --noconfirm -Suu'
-
-  check:
-    needs: [build]
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        continue-on-error: true
-        with:
-          name: UCRT64-packages
-          path: C:/_/artifacts
-      - name: Check whether to Run
-        id: check-run
-        run: |
-          python .ci/ci-check.py --whether-to-run
-      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
-        if: steps.check-run.outputs.run == 'true'
-        with:
-          msystem: UCRT64
-          update: true
-          release: ${{ runner.arch != 'ARM64' }}
-          install: mingw-w64-ucrt-x86_64-python-pip mingw-w64-ucrt-x86_64-python-pacdb
-      - name: Add staging repo
-        if: steps.check-run.outputs.run == 'true'
-        shell: msys2 {0}
-        run: |
-          sed -i '1s|^|[staging]\nServer = https://repo.msys2.org/staging/\nSigLevel = Never\n|' /etc/pacman.conf
-      - name: Update using staging
-        if: steps.check-run.outputs.run == 'true'
-        run: |
-          msys2 -c 'pacman --noconfirm -Suuy'
-          msys2 -c 'pacman --noconfirm -Suu'
-      - name: Run Checks
-        if: steps.check-run.outputs.run == 'true'
-        shell: msys2 {0}
-        run: |
-          python .ci/ci-check.py
+{
+  "name": "trusted-base-workflow-source-audit",
+  "on": {
+    "pull_request_target": {
+      "branches": [
+        "master",
+        "crutkas-arm64-ci-action-pins"
+      ],
+      "types": [
+        "opened",
+        "synchronize",
+        "reopened",
+        "ready_for_review"
+      ]
+    }
+  },
+  "permissions": {},
+  "concurrency": {
+    "group": "trusted-base-workflow-source-audit-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}",
+    "cancel-in-progress": true
+  },
+  "jobs": {
+    "offline-source-audit": {
+      "name": "Trusted-base source audit (candidate exists only as bare Git objects)",
+      "runs-on": "ubuntu-24.04",
+      "permissions": {
+        "contents": "read"
+      },
+      "timeout-minutes": 5,
+      "steps": [
+        {
+          "name": "Checkout exact trusted base without credentials",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.event.pull_request.base.sha }}",
+            "path": "trusted",
+            "persist-credentials": false,
+            "fetch-depth": 1,
+            "lfs": false,
+            "submodules": false,
+            "clean": true,
+            "set-safe-directory": false,
+            "show-progress": false
+          }
+        },
+        {
+          "name": "Fetch and parse exact candidate as bare objects",
+          "shell": "bash --noprofile --norc -euo pipefail {0}",
+          "env": {
+            "AUDIT_REPOSITORY": "${{ github.repository }}",
+            "AUDIT_REPOSITORY_OWNER": "${{ github.repository_owner }}",
+            "AUDIT_BASE_REPOSITORY": "${{ github.event.pull_request.base.repo.full_name }}",
+            "AUDIT_HEAD_REPOSITORY": "${{ github.event.pull_request.head.repo.full_name }}",
+            "AUDIT_BASE_REF": "${{ github.event.pull_request.base.ref }}",
+            "AUDIT_BASE_SHA": "${{ github.event.pull_request.base.sha }}",
+            "AUDIT_HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+            "AUDIT_PR_NUMBER": "${{ github.event.pull_request.number }}",
+            "AUDIT_SERVER_URL": "${{ github.server_url }}",
+            "AUDIT_WORKSPACE": "${{ github.workspace }}",
+            "AUDIT_RUNNER_TEMP": "${{ runner.temp }}",
+            "AUDIT_TRUSTED_ROOT": "${{ github.workspace }}/trusted",
+            "AUDIT_RUN_ID": "${{ github.run_id }}",
+            "AUDIT_RUN_ATTEMPT": "${{ github.run_attempt }}",
+            "BASH_ENV": "/dev/null",
+            "ENV": "/dev/null",
+            "CDPATH": "",
+            "LD_PRELOAD": "",
+            "LD_LIBRARY_PATH": ""
+          },
+          "run": "set -f\nIFS=$'\\n\\t'\numask 077\nfail() {\n  printf '%s\\n' \"ERROR: $1\" >&2\n  exit 1\n}\nfor required_name in AUDIT_REPOSITORY AUDIT_REPOSITORY_OWNER AUDIT_BASE_REPOSITORY AUDIT_HEAD_REPOSITORY AUDIT_BASE_REF AUDIT_BASE_SHA AUDIT_HEAD_SHA AUDIT_PR_NUMBER AUDIT_SERVER_URL AUDIT_WORKSPACE AUDIT_RUNNER_TEMP AUDIT_TRUSTED_ROOT AUDIT_RUN_ID AUDIT_RUN_ATTEMPT; do\n  [[ -n \"${!required_name-}\" ]] || fail \"required event or runner field is empty\"\ndone\nrepository_pattern='^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$'\n[[ \"$AUDIT_REPOSITORY\" =~ $repository_pattern ]] || fail \"base repository identity is malformed\"\n[[ \"$AUDIT_BASE_REPOSITORY\" =~ $repository_pattern ]] || fail \"event base repository identity is malformed\"\n[[ \"$AUDIT_HEAD_REPOSITORY\" =~ $repository_pattern ]] || fail \"event head repository identity is malformed\"\nrepository_owner=\"${AUDIT_REPOSITORY%%/*}\"\nrepository_name=\"${AUDIT_REPOSITORY#*/}\"\n[[ \"$repository_owner\" == \"$AUDIT_REPOSITORY_OWNER\" ]] || fail \"repository owner identity mismatch\"\n[[ \"$AUDIT_BASE_REPOSITORY\" == \"$AUDIT_REPOSITORY\" ]] || fail \"pull request base repository identity mismatch\"\n[[ \"$repository_owner\" != \".\" && \"$repository_owner\" != \"..\" && \"$repository_name\" != \".\" && \"$repository_name\" != \"..\" ]] || fail \"repository identity is ambiguous\"\n[[ \"$repository_owner\" != *..* && \"$repository_name\" != *..* ]] || fail \"repository identity contains an ambiguous component\"\ncase \"$AUDIT_BASE_REF\" in\n  master|crutkas-arm64-ci-action-pins) ;;\n  *) fail \"pull request base ref is not protected by this policy\" ;;\nesac\n[[ \"$AUDIT_PR_NUMBER\" =~ ^[1-9][0-9]*$ ]] || fail \"pull request number is not canonical decimal\"\n[[ \"$AUDIT_RUN_ID\" =~ ^[1-9][0-9]*$ ]] || fail \"run id is not canonical decimal\"\n[[ \"$AUDIT_RUN_ATTEMPT\" =~ ^[1-9][0-9]*$ ]] || fail \"run attempt is not canonical decimal\"\n[[ \"$AUDIT_BASE_SHA\" =~ ^[0-9a-f]{40}$ ]] || fail \"base SHA is not lowercase 40-hex\"\n[[ \"$AUDIT_HEAD_SHA\" =~ ^[0-9a-f]{40}$ ]] || fail \"head SHA is not lowercase 40-hex\"\n[[ \"$AUDIT_SERVER_URL\" == \"https://github.com\" ]] || fail \"GitHub HTTPS host is not admitted\"\nfor required_tool in /usr/bin/env /usr/bin/git /usr/bin/python3 /usr/bin/realpath /usr/bin/mkdir /usr/bin/rm; do\n  [[ -x \"$required_tool\" ]] || fail \"required system Git/Python/coreutils capability is unavailable\"\ndone\nworkspace_root=\"$(/usr/bin/realpath -e -- \"$AUDIT_WORKSPACE\")\" || fail \"workspace path cannot be canonicalized\"\nrunner_temp=\"$(/usr/bin/realpath -e -- \"$AUDIT_RUNNER_TEMP\")\" || fail \"runner temp path cannot be canonicalized\"\ntrusted_root=\"$(/usr/bin/realpath -e -- \"$AUDIT_TRUSTED_ROOT\")\" || fail \"trusted checkout path cannot be canonicalized\"\n[[ \"$AUDIT_WORKSPACE\" == \"$workspace_root\" && \"$AUDIT_RUNNER_TEMP\" == \"$runner_temp\" && \"$AUDIT_TRUSTED_ROOT\" == \"$trusted_root\" ]] || fail \"runner paths are not canonical\"\n[[ \"$workspace_root\" == /* && \"$runner_temp\" == /* && \"$runner_temp\" != \"/\" ]] || fail \"runner paths are not safe absolute paths\"\n[[ \"$trusted_root\" == \"$workspace_root/trusted\" ]] || fail \"trusted checkout is not isolated at the admitted path\"\n[[ \"$runner_temp\" != \"$workspace_root\" && \"$runner_temp\" != \"$workspace_root/\"* ]] || fail \"candidate object database would be inside the workspace\"\ntrusted_checker=\"$trusted_root/.ci/check-workflow-hardening.py\"\n[[ -f \"$trusted_checker\" && ! -L \"$trusted_checker\" ]] || fail \"trusted checker is not a regular non-symlink file\"\nremote_url=\"${AUDIT_SERVER_URL}/${AUDIT_REPOSITORY}.git\"\n[[ \"$remote_url\" =~ ^https://github\\.com/[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\\.git$ ]] || fail \"fetch remote is not an admitted HTTPS repository URL\"\n[[ \"$remote_url\" == \"https://github.com/${AUDIT_BASE_REPOSITORY}.git\" ]] || fail \"fetch remote does not identify the exact base repository\"\ngit_environment=(\n  /usr/bin/env -i\n  PATH=/usr/bin:/bin\n  HOME=/nonexistent\n  XDG_CONFIG_HOME=/nonexistent\n  LC_ALL=C\n  GIT_CONFIG_NOSYSTEM=1\n  GIT_CONFIG_SYSTEM=/dev/null\n  GIT_CONFIG_GLOBAL=/dev/null\n  GIT_CONFIG=/dev/null\n  GIT_ATTR_NOSYSTEM=1\n  GIT_TERMINAL_PROMPT=0\n  GCM_INTERACTIVE=never\n  GIT_ASKPASS=/bin/false\n  SSH_ASKPASS=/bin/false\n  GIT_NO_REPLACE_OBJECTS=1\n  GIT_OPTIONAL_LOCKS=0\n  GIT_LITERAL_PATHSPECS=1\n  GIT_NOGLOB_PATHSPECS=1\n  GIT_PROTOCOL_FROM_USER=0\n  GIT_ALLOW_PROTOCOL=https\n  GIT_LFS_SKIP_SMUDGE=1\n)\ngit_command=(\n  /usr/bin/git\n  --no-pager\n  --no-replace-objects\n  -c credential.helper=\n  -c credential.interactive=never\n  -c core.askPass=/bin/false\n  -c core.hooksPath=/dev/null\n  -c core.fsmonitor=false\n  -c core.useReplaceRefs=false\n  -c extensions.worktreeConfig=false\n  -c protocol.allow=never\n  -c protocol.https.allow=always\n  -c protocol.file.allow=never\n  -c protocol.ext.allow=never\n  -c protocol.ssh.allow=never\n  -c http.proxy=\n  -c https.proxy=\n  -c http.extraHeader=\n  -c remote.origin.proxy=\n  -c transfer.fsckObjects=true\n  -c fetch.fsckObjects=true\n  -c receive.fsckObjects=true\n  -c fetch.writeCommitGraph=false\n  -c core.commitGraph=false\n  -c gc.auto=0\n  -c maintenance.auto=false\n  -c submodule.recurse=false\n  -c fetch.recurseSubmodules=false\n  -c core.sparseCheckout=false\n  -c core.sparseCheckoutCone=false\n  -c filter.lfs.required=false\n  -c filter.lfs.process=\n  -c filter.lfs.smudge=\n  -c filter.lfs.clean=\n)\ntrusted_commit=\"$(\"${git_environment[@]}\" \"${git_command[@]}\" -C \"$trusted_root\" rev-parse --verify 'HEAD^{commit}')\" || fail \"trusted checkout commit cannot be resolved\"\n[[ \"$trusted_commit\" == \"$AUDIT_BASE_SHA\" ]] || fail \"trusted checkout does not equal the exact event base SHA\"\ncandidate_git_dir=\"$runner_temp/workflow-audit-${AUDIT_RUN_ID}-${AUDIT_RUN_ATTEMPT}.git\"\n[[ \"$candidate_git_dir\" == \"$runner_temp/\"* && \"$candidate_git_dir\" != \"$runner_temp/\" && ! -e \"$candidate_git_dir\" && ! -L \"$candidate_git_dir\" ]] || fail \"candidate object database path is not fresh and owned\"\nowned_candidate=0\ncleanup_candidate() {\n  cleanup_status=$?\n  trap - EXIT\n  if [[ \"$owned_candidate\" == 1 ]]; then\n    cleanup_path=\"$(/usr/bin/realpath -e -- \"$candidate_git_dir\" 2>/dev/null || true)\"\n    if [[ \"$cleanup_path\" != \"$candidate_git_dir\" ]]; then\n      printf '%s\\n' \"ERROR: refusing to clean a changed candidate object path\" >&2\n      [[ \"$cleanup_status\" != 0 ]] || cleanup_status=1\n    elif ! /usr/bin/rm -rf -- \"$candidate_git_dir\"; then\n      printf '%s\\n' \"ERROR: failed to clean the owned candidate object database\" >&2\n      [[ \"$cleanup_status\" != 0 ]] || cleanup_status=1\n    fi\n  fi\n  exit \"$cleanup_status\"\n}\ntrap cleanup_candidate EXIT\n/usr/bin/mkdir --mode=0700 -- \"$candidate_git_dir\" || fail \"candidate object database directory cannot be created\"\nowned_candidate=1\n[[ \"$(/usr/bin/realpath -e -- \"$candidate_git_dir\")\" == \"$candidate_git_dir\" ]] || fail \"candidate object database path changed after creation\"\n\"${git_environment[@]}\" \"${git_command[@]}\" init --quiet --bare --object-format=sha1 --template=/dev/null -- \"$candidate_git_dir\" || fail \"bare candidate object database initialization failed\"\npull_refspec=\"+refs/pull/${AUDIT_PR_NUMBER}/head:refs/workflow-audit/pr-head\"\n\"${git_environment[@]}\" \"${git_command[@]}\" --git-dir=\"$candidate_git_dir\" fetch --quiet --force --no-tags --no-recurse-submodules --no-write-fetch-head --no-auto-maintenance --depth=1 -- \"$remote_url\" \"$pull_refspec\" || fail \"exact base-repository pull ref fetch failed\"\n/usr/bin/python3 -I -B \"$trusted_checker\" --self-test\n/usr/bin/python3 -I -B \"$trusted_checker\" --git-dir \"$candidate_git_dir\" --commit \"$AUDIT_HEAD_SHA\"\n"
+        }
+      ]
+    }
+  }
+}
