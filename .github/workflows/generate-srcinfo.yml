@@ -14,12 +14,13 @@ jobs:
     if: ${{ github.repository == 'msys2/MINGW-packages' || github.event_name == 'workflow_dispatch' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           filter: tree:0
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         id: setup-python
         with:
           python-version: '3.11'
@@ -30,7 +31,7 @@ jobs:
         run: |
           pipx install --python '${{ steps.setup-python.outputs.python-path }}' 'msys2-devtools[srcinfo-cache] @ git+https://github.com/msys2/msys2-devtools'
 
-      - uses: msys2/setup-msys2@v2
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         id: msys2
         with:
           msystem: MSYS
@@ -47,7 +48,7 @@ jobs:
         run: |
           msys2-srcinfo-cache --time-limit 19800 mingw '${{ steps.msys2.outputs.msys2-location }}' . srcinfo.json.gz
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: result-win
           path: |
@@ -57,11 +58,11 @@ jobs:
     needs: update-srcinfo-win
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: result-win
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         id: setup-python
         with:
           python-version: '3.11'
@@ -82,7 +83,7 @@ jobs:
           ./bin/grype sbom:sbom.cdx.json -o cyclonedx-json --file sbom.vuln.cdx.json
           msys2-sbom merge sbom.cdx.json sbom.vuln.cdx.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: result-linux
           path: |
@@ -96,7 +97,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: result-*
           merge-multiple: true
