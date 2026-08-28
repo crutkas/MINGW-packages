@@ -1,160 +1,75 @@
-name: main
-
-concurrency:
-  group: ${{ github.ref }}
-  cancel-in-progress: true
-
-on:
-  push:
-  pull_request:
-
-jobs:
-  build:
-    if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/master'}}
-    strategy:
-      fail-fast: false
-      matrix:
-        include: [
-          { msystem: UCRT64, runner: windows-2025 },
-          { msystem: CLANG64, runner: windows-2025 },
-          { msystem: MINGW64, runner: windows-2025 },
-          { msystem: MINGW32, runner: windows-2025 },
-          # { msystem: CLANGARM64, runner: ['Windows', 'ARM64', 'CI'] }
-        ]
-    name: ${{ matrix.msystem }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Get CPU Name
-        run : |
-          Get-CIMInstance -Class Win32_Processor | Select-Object -Property Name
-
-      - name: Setup JIT minidump
-        if: ${{ matrix.msystem != 'CLANGARM64' }}
-        run: |
-          Set-Location '${{ runner.temp }}'
-          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile Procdump.zip
-          Expand-Archive Procdump.zip -DestinationPath .
-          New-Item -Path '_dumps' -ItemType Directory
-          .\procdump64.exe -accepteula -ma -i "${{ runner.temp }}/_dumps"
-          .\procdump.exe -accepteula -ma -i "${{ runner.temp }}/_dumps"
-
-      - name: Configure Pagefile
-        if: ${{ matrix.msystem != 'CLANGARM64' }}
-        # https://github.com/al-cheb/configure-pagefile-action/issues/16
-        continue-on-error: true
-        uses: al-cheb/configure-pagefile-action@a3b6ebd6b634da88790d9c58d4b37a7f4a7b8708 # v1.4
-        with:
-          minimum-size: 4GB
-          maximum-size: 16GB
-          disk-root: "C:"
-
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: temp
-          fetch-depth: 0
-          filter: blob:none
-          persist-credentials: false
-
-      # to match the autobuild environment
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-          architecture: 'x64'
-
-      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
-        with:
-          msystem: ${{ matrix.msystem }}
-          install: git python base-devel
-          update: true
-          release: ${{ runner.arch != 'ARM64' }}
-          location: 'D:\M'
-
-      - name: Add staging repo
-        shell: msys2 {0}
-        run: |
-          cp /etc/pacman.conf /etc/pacman.conf.bak
-          grep -qFx '[staging]' /etc/pacman.conf || sed -i '/^# \[staging\]/,/^$/ s|^# ||g' /etc/pacman.conf
-
-      - name: Update using staging
-        run: |
-          msys2 -c 'pacman --noconfirm -Suuy'
-          msys2 -c 'pacman --noconfirm -Suu'
-
-      - name: Move Checkout
-        run: |
-          If (Test-Path "C:\_") { rm -r -fo "C:\_" }
-          Copy-Item -Path ".\temp" -Destination "C:\_" -Recurse
-
-      - name: CI-Build
-        shell: msys2 {0}
-        id: build
-        run: |
-          cd /C/_
-          unset VCPKG_ROOT
-          MINGW_ARCH=${{ matrix.msystem }} ./.ci/ci-build.sh
-
-      - name: "Upload binaries"
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ${{ matrix.msystem }}-packages
-          path: C:/_/artifacts/*.pkg.tar.*
-          if-no-files-found: ignore
-
-      - name: "Upload dumps"
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ${{ matrix.msystem }}-dumps
-          path: ${{ runner.temp }}/_dumps/*.dmp
-          if-no-files-found: ignore
-
-      - name: "Clean up runner"
-        if: ${{ always() }}
-        continue-on-error: true
-        run: |
-          If (Test-Path "C:\_") { rm -r -fo "C:\_" }
-          msys2 -c 'mv -f /etc/pacman.conf.bak /etc/pacman.conf'
-          msys2 -c 'pacman --noconfirm -Suuy'
-          msys2 -c 'pacman --noconfirm -Suu'
-
-  check:
-    needs: [build]
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        continue-on-error: true
-        with:
-          name: UCRT64-packages
-          path: C:/_/artifacts
-      - name: Check whether to Run
-        id: check-run
-        run: |
-          python .ci/ci-check.py --whether-to-run
-      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
-        if: steps.check-run.outputs.run == 'true'
-        with:
-          msystem: UCRT64
-          update: true
-          release: ${{ runner.arch != 'ARM64' }}
-          install: mingw-w64-ucrt-x86_64-python-pip mingw-w64-ucrt-x86_64-python-pacdb
-      - name: Add staging repo
-        if: steps.check-run.outputs.run == 'true'
-        shell: msys2 {0}
-        run: |
-          sed -i '1s|^|[staging]\nServer = https://repo.msys2.org/staging/\nSigLevel = Never\n|' /etc/pacman.conf
-      - name: Update using staging
-        if: steps.check-run.outputs.run == 'true'
-        run: |
-          msys2 -c 'pacman --noconfirm -Suuy'
-          msys2 -c 'pacman --noconfirm -Suu'
-      - name: Run Checks
-        if: steps.check-run.outputs.run == 'true'
-        shell: msys2 {0}
-        run: |
-          python .ci/ci-check.py
+{
+  "name": "trusted-base-workflow-source-audit",
+  "on": {
+    "pull_request_target": {
+      "branches": [
+        "master",
+        "crutkas-arm64-ci-action-pins"
+      ],
+      "types": [
+        "opened",
+        "synchronize",
+        "reopened",
+        "ready_for_review"
+      ]
+    }
+  },
+  "permissions": {},
+  "concurrency": {
+    "group": "trusted-base-workflow-source-audit-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}",
+    "cancel-in-progress": true
+  },
+  "jobs": {
+    "offline-source-audit": {
+      "name": "Trusted-base source audit (candidate bytes are never executed)",
+      "runs-on": "ubuntu-24.04",
+      "permissions": {
+        "contents": "read"
+      },
+      "timeout-minutes": 5,
+      "steps": [
+        {
+          "name": "Checkout trusted base without credentials",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.event.pull_request.base.sha }}",
+            "path": "trusted-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-nomatrix",
+            "persist-credentials": false,
+            "fetch-depth": 1,
+            "lfs": false,
+            "submodules": false,
+            "clean": true,
+            "set-safe-directory": false,
+            "show-progress": false
+          }
+        },
+        {
+          "name": "Checkout exact candidate head as inert input",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name }}",
+            "ref": "${{ github.event.pull_request.head.sha }}",
+            "path": "candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-nomatrix",
+            "persist-credentials": false,
+            "fetch-depth": 1,
+            "lfs": false,
+            "submodules": false,
+            "clean": true,
+            "set-safe-directory": false,
+            "show-progress": false
+          }
+        },
+        {
+          "name": "Parse candidate source with trusted checker",
+          "shell": "bash",
+          "env": {
+            "TRUSTED_ROOT": "trusted-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-nomatrix",
+            "CANDIDATE_ROOT": "candidate-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-nomatrix"
+          },
+          "run": "python3 -I -B \"$GITHUB_WORKSPACE/$TRUSTED_ROOT/.ci/check-workflow-hardening.py\" --self-test\npython3 -I -B \"$GITHUB_WORKSPACE/$TRUSTED_ROOT/.ci/check-workflow-hardening.py\" --repo \"$GITHUB_WORKSPACE/$CANDIDATE_ROOT\""
+        }
+      ]
+    }
+  }
+}
